@@ -11,13 +11,14 @@
 from uuid import uuid4
 
 import pytest
+from pydantic import ValidationError
+
 from coreason_enclave.schemas import (
     AggregationStrategy,
     AttestationReport,
     FederationJob,
     PrivacyConfig,
 )
-from pydantic import ValidationError
 
 
 def test_aggregation_strategy_enum() -> None:
@@ -123,7 +124,7 @@ def test_attestation_report_invalid_status() -> None:
     with pytest.raises(ValidationError):
         AttestationReport(
             node_id="node_123",
-            hardware_type="NVIDIA_H100_HOPPER",
+            hardware_type="NVIDIA_H123_HOPPER",
             enclave_signature="sig_123",
             measurement_hash="hash_123",
             status="MAYBE",  # type: ignore

@@ -12,6 +12,7 @@ import os
 from unittest.mock import MagicMock, patch
 
 import pytest
+
 from coreason_enclave.hardware import get_attestation_provider
 from coreason_enclave.hardware.real import RealAttestationProvider
 from coreason_enclave.hardware.simulated import SimulatedAttestationProvider
