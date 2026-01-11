@@ -8,7 +8,9 @@
 #
 # Source Code: https://github.com/CoReason-AI/coreason_enclave
 
+from importlib import reload
 from pathlib import Path
+from unittest.mock import patch
 
 from coreason_enclave.utils.logger import logger
 
@@ -33,3 +35,17 @@ def test_logger_initialization() -> None:
 def test_logger_exports() -> None:
     """Test that logger is exported."""
     assert logger is not None
+
+
+def test_logger_creates_logs_dir() -> None:
+    """Test that logger creates logs directory if it doesn't exist."""
+    # We use patch to simulate the directory not existing
+    # We reload the module to trigger the top-level code again
+    with (
+        patch("pathlib.Path.exists", return_value=False),
+        patch("pathlib.Path.mkdir") as mock_mkdir,
+    ):
+        import coreason_enclave.utils.logger
+
+        reload(coreason_enclave.utils.logger)
+        mock_mkdir.assert_called()

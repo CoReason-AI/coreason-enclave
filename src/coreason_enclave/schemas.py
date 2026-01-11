@@ -12,7 +12,7 @@ from enum import Enum
 from typing import List, Literal
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, model_validator
 
 
 class AggregationStrategy(str, Enum):
@@ -31,9 +31,9 @@ class PrivacyConfig(BaseModel):
     """
 
     mechanism: str = "DP_SGD"
-    noise_multiplier: float
-    max_grad_norm: float
-    target_epsilon: float
+    noise_multiplier: float = Field(..., ge=0.0)
+    max_grad_norm: float = Field(..., gt=0.0)
+    target_epsilon: float = Field(..., gt=0.0)
 
 
 class FederationJob(BaseModel):
@@ -42,11 +42,20 @@ class FederationJob(BaseModel):
     """
 
     job_id: UUID
-    clients: List[str]
-    min_clients: int
-    rounds: int
+    clients: List[str] = Field(..., min_length=1)
+    min_clients: int = Field(..., ge=1)
+    rounds: int = Field(..., ge=1)
     strategy: AggregationStrategy
     privacy: PrivacyConfig
+
+    @model_validator(mode="after")
+    def check_min_clients_satisfied(self) -> "FederationJob":
+        """
+        Validate that enough clients are provided to satisfy min_clients.
+        """
+        if len(self.clients) < self.min_clients:
+            raise ValueError(f"Number of clients ({len(self.clients)}) is less than min_clients ({self.min_clients})")
+        return self
 
 
 class AttestationReport(BaseModel):
@@ -54,8 +63,8 @@ class AttestationReport(BaseModel):
     Report for Remote Attestation of the Enclave.
     """
 
-    node_id: str
-    hardware_type: str
-    enclave_signature: str
-    measurement_hash: str
+    node_id: str = Field(..., min_length=1)
+    hardware_type: str = Field(..., min_length=1)
+    enclave_signature: str = Field(..., min_length=1)
+    measurement_hash: str = Field(..., min_length=1)
     status: Literal["TRUSTED", "UNTRUSTED"]

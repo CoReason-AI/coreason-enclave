@@ -61,6 +61,26 @@ def test_privacy_config_missing_fields() -> None:
         )  # type: ignore
 
 
+def test_privacy_config_invalid_values() -> None:
+    """Test PrivacyConfig validation for invalid numeric values."""
+    with pytest.raises(ValidationError) as excinfo:
+        PrivacyConfig(
+            noise_multiplier=-0.1,
+            max_grad_norm=1.0,
+            target_epsilon=3.0,
+        )
+    # Pydantic v2 error message usually contains this
+    assert "Input should be greater than or equal to 0" in str(excinfo.value)
+
+    with pytest.raises(ValidationError) as excinfo:
+        PrivacyConfig(
+            noise_multiplier=1.0,
+            max_grad_norm=0.0,
+            target_epsilon=3.0,
+        )
+    assert "Input should be greater than 0" in str(excinfo.value)
+
+
 def test_federation_job_valid() -> None:
     """Test creating a valid FederationJob."""
     job_id = uuid.uuid4()
@@ -101,6 +121,81 @@ def test_federation_job_invalid_strategy() -> None:
         )
 
 
+def test_federation_job_invalid_counts() -> None:
+    """Test FederationJob validation for invalid counts."""
+    job_id = uuid.uuid4()
+    privacy = PrivacyConfig(
+        noise_multiplier=1.0,
+        max_grad_norm=1.0,
+        target_epsilon=3.0,
+    )
+
+    # Test min_clients < 1
+    with pytest.raises(ValidationError) as excinfo:
+        FederationJob(
+            job_id=job_id,
+            clients=["node1"],
+            min_clients=0,
+            rounds=10,
+            strategy=AggregationStrategy.FED_AVG,
+            privacy=privacy,
+        )
+    assert "Input should be greater than or equal to 1" in str(excinfo.value)
+
+    # Test rounds < 1
+    with pytest.raises(ValidationError) as excinfo:
+        FederationJob(
+            job_id=job_id,
+            clients=["node1"],
+            min_clients=1,
+            rounds=0,
+            strategy=AggregationStrategy.FED_AVG,
+            privacy=privacy,
+        )
+    assert "Input should be greater than or equal to 1" in str(excinfo.value)
+
+
+def test_federation_job_clients_mismatch() -> None:
+    """Test FederationJob validation when clients list is shorter than min_clients."""
+    job_id = uuid.uuid4()
+    privacy = PrivacyConfig(
+        noise_multiplier=1.0,
+        max_grad_norm=1.0,
+        target_epsilon=3.0,
+    )
+
+    with pytest.raises(ValidationError) as excinfo:
+        FederationJob(
+            job_id=job_id,
+            clients=["node1"],
+            min_clients=2,
+            rounds=10,
+            strategy=AggregationStrategy.FED_AVG,
+            privacy=privacy,
+        )
+    assert "Number of clients (1) is less than min_clients (2)" in str(excinfo.value)
+
+
+def test_federation_job_empty_clients() -> None:
+    """Test FederationJob validation for empty clients list."""
+    job_id = uuid.uuid4()
+    privacy = PrivacyConfig(
+        noise_multiplier=1.0,
+        max_grad_norm=1.0,
+        target_epsilon=3.0,
+    )
+    with pytest.raises(ValidationError) as excinfo:
+        FederationJob(
+            job_id=job_id,
+            clients=[],
+            min_clients=1,
+            rounds=10,
+            strategy=AggregationStrategy.FED_AVG,
+            privacy=privacy,
+        )
+    assert "List should have at least 1 item" in str(excinfo.value)
+
+
 def test_attestation_report_valid() -> None:
     """Test creating a valid AttestationReport."""
     report = AttestationReport(
@@ -124,3 +219,16 @@ def test_attestation_report_invalid_status() -> None:
             measurement_hash="hash123",
             status="SOME_OTHER_STATUS",  # type: ignore
         )
+
+
+def test_attestation_report_empty_strings() -> None:
+    """Test AttestationReport validation for empty strings."""
+    with pytest.raises(ValidationError) as excinfo:
+        AttestationReport(
+            node_id="",
+            hardware_type="NVIDIA_H100_HOPPER",
+            enclave_signature="sig",
+            measurement_hash="hash",
+            status="TRUSTED",
+        )
+    assert "String should have at least 1 character" in str(excinfo.value)
