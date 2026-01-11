@@ -11,14 +11,13 @@
 from uuid import uuid4
 
 import pytest
-from pydantic import ValidationError
-
 from coreason_enclave.schemas import (
     AggregationStrategy,
     AttestationReport,
     FederationJob,
     PrivacyConfig,
 )
+from pydantic import ValidationError
 
 
 def test_aggregation_strategy_enum() -> None:
