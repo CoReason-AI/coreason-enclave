@@ -124,7 +124,7 @@ def test_attestation_report_invalid_status() -> None:
     with pytest.raises(ValidationError):
         AttestationReport(
             node_id="node_123",
-            hardware_type="NVIDIA_H100_HOPPER",
+            hardware_type="NVIDIA_H123_HOPPER",
             enclave_signature="sig_123",
             measurement_hash="hash_123",
             status="MAYBE",  # type: ignore
