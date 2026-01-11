@@ -8,27 +8,37 @@
 #
 # Source Code: https://github.com/CoReason-AI/coreason_enclave
 
-import os
 from pathlib import Path
-from unittest.mock import patch, MagicMock
-from coreason_enclave.utils.logger import logger
+from unittest.mock import MagicMock, patch
 
-def test_logger_initialization():
+import coreason_enclave.utils.logger
+
+
+def test_logger_initialization() -> None:
     """Test that the logger is initialized correctly and creates the log directory."""
-    # Since the logger is initialized on import, we check side effects
-
-    # Check if logs directory creation is handled
-    # Note: running this test might actually create the directory in the test environment
-    # if it doesn't exist.
-
     log_path = Path("logs")
+    # Ensure it exists (it should have been created by import)
     assert log_path.exists()
     assert log_path.is_dir()
 
-    # Verify app.log creation if it was logged to (it might be empty or not created until log)
-    # logger.info("Test log")
-    # assert (log_path / "app.log").exists()
 
-def test_logger_exports():
+def test_logger_exports() -> None:
     """Test that logger is exported."""
+    from coreason_enclave.utils.logger import logger
+
     assert logger is not None
+
+
+def test_logger_creates_directory_if_missing() -> None:
+    """Test that logger creation logic attempts to create directory if missing."""
+    with patch("coreason_enclave.utils.logger.Path") as mock_path_cls:
+        mock_path_instance = MagicMock()
+        mock_path_cls.return_value = mock_path_instance
+        # Simulate directory does not exist
+        mock_path_instance.exists.return_value = False
+
+        # Call the configuration function directly
+        coreason_enclave.utils.logger._configure_logger()
+
+        # Verify mkdir was called
+        mock_path_instance.mkdir.assert_called_with(parents=True, exist_ok=True)
