@@ -9,6 +9,7 @@
 # Source Code: https://github.com/CoReason-AI/coreason_enclave
 
 from pathlib import Path
+from typing import Optional
 
 from coreason_enclave.schemas import AttestationReport
 from coreason_enclave.utils.logger import logger
@@ -32,7 +33,10 @@ class RealAttestationProvider(AttestationProvider):
 
     def __init__(self) -> None:
         logger.info("Initializing Real Attestation Provider. Verifying hardware...")
-        if not self._check_hardware():
+        self.device_path: Optional[Path] = None
+        self.device_path = self._check_hardware()
+
+        if not self.device_path:
             error_msg = (
                 "No TEE hardware detected! "
                 "Ensure you are running on an SGX/SEV/TDX enabled machine "
@@ -41,15 +45,29 @@ class RealAttestationProvider(AttestationProvider):
             logger.critical(error_msg)
             raise RuntimeError(error_msg)
 
-    def _check_hardware(self) -> bool:
+    def _check_hardware(self) -> Optional[Path]:
         """
-        Check if any TEE device exists.
+        Check if any TEE device exists and is readable.
+        Returns the path of the first valid device found.
         """
         for device in self.TEE_DEVICES:
             if device.exists():
-                logger.info(f"TEE Hardware detected: {device}")
-                return True
-        return False
+                try:
+                    # Attempt to open the device to verify permissions
+                    with open(device, "rb"):
+                        pass
+                    logger.info(f"TEE Hardware detected and verified: {device}")
+                    return device
+                except PermissionError as e:
+                    logger.error(f"Permission denied accessing TEE device: {device}")
+                    raise PermissionError(
+                        f"Permission denied: {device}. "
+                        "Ensure the current user belongs to the appropriate group (e.g., 'sgx', 'kvm')."
+                    ) from e
+                except OSError as e:
+                    logger.warning(f"Could not access {device}: {e}")
+                    continue
+        return None
 
     def attest(self) -> AttestationReport:
         """
