@@ -36,6 +36,18 @@ def test_privacy_config_negative_noise() -> None:
         PrivacyConfig(noise_multiplier=-0.1, max_grad_norm=1.0, target_epsilon=1.0)
 
 
+def test_privacy_config_zero_noise() -> None:
+    """Test that zero noise is allowed (non-negative)."""
+    config = PrivacyConfig(noise_multiplier=0.0, max_grad_norm=1.0, target_epsilon=1.0)
+    assert config.noise_multiplier == 0.0
+
+
+def test_privacy_config_small_epsilon() -> None:
+    """Test very small positive epsilon is valid."""
+    config = PrivacyConfig(noise_multiplier=1.0, max_grad_norm=1.0, target_epsilon=1e-9)
+    assert config.target_epsilon == 1e-9
+
+
 def test_privacy_config_invalid_grad_norm() -> None:
     with pytest.raises(ValidationError, match="max_grad_norm must be positive"):
         PrivacyConfig(noise_multiplier=1.0, max_grad_norm=0.0, target_epsilon=1.0)
@@ -60,6 +72,42 @@ def test_federation_job_valid() -> None:
     )
     assert len(job.clients) == 2
     assert job.rounds == 50
+
+
+def test_federation_job_boundaries() -> None:
+    """Test boundary conditions for rounds and clients."""
+    # Rounds = 1 (Lower bound)
+    job_min = FederationJob(
+        job_id=uuid4(),
+        clients=["node_a"],
+        min_clients=1,
+        rounds=1,
+        strategy=AggregationStrategy.FED_AVG,
+        privacy=PrivacyConfig(noise_multiplier=1.0, max_grad_norm=1.0, target_epsilon=1.0),
+    )
+    assert job_min.rounds == 1
+
+    # Rounds = 10000 (Upper bound)
+    job_max = FederationJob(
+        job_id=uuid4(),
+        clients=["node_a"],
+        min_clients=1,
+        rounds=10000,
+        strategy=AggregationStrategy.FED_AVG,
+        privacy=PrivacyConfig(noise_multiplier=1.0, max_grad_norm=1.0, target_epsilon=1.0),
+    )
+    assert job_max.rounds == 10000
+
+    # Min clients = len(clients) (Upper bound)
+    job_clients = FederationJob(
+        job_id=uuid4(),
+        clients=["node_a", "node_b"],
+        min_clients=2,
+        rounds=10,
+        strategy=AggregationStrategy.FED_AVG,
+        privacy=PrivacyConfig(noise_multiplier=1.0, max_grad_norm=1.0, target_epsilon=1.0),
+    )
+    assert job_clients.min_clients == 2
 
 
 def test_federation_job_rounds_bounds() -> None:
@@ -96,6 +144,20 @@ def test_federation_job_unique_clients() -> None:
             strategy=AggregationStrategy.FED_AVG,
             privacy=PrivacyConfig(noise_multiplier=1.0, max_grad_norm=1.0, target_epsilon=1.0),
         )
+
+
+def test_federation_job_client_uniqueness_case_sensitivity() -> None:
+    """Test that client uniqueness is case-sensitive."""
+    # "node_a" and "NODE_A" are different strings, so this should be valid
+    job = FederationJob(
+        job_id=uuid4(),
+        clients=["node_a", "NODE_A"],
+        min_clients=2,
+        rounds=10,
+        strategy=AggregationStrategy.FED_AVG,
+        privacy=PrivacyConfig(noise_multiplier=1.0, max_grad_norm=1.0, target_epsilon=1.0),
+    )
+    assert len(job.clients) == 2
 
 
 def test_federation_job_min_clients_logic() -> None:
@@ -135,6 +197,20 @@ def test_attestation_report_valid() -> None:
         status="TRUSTED",
     )
     assert report.measurement_hash == valid_hash
+
+
+def test_attestation_report_hex_variations() -> None:
+    """Test mixed case hex strings."""
+    # Mixed case should be valid as hex
+    mixed_hash = ("a" * 32) + ("A" * 32)
+    report = AttestationReport(
+        node_id="node_x",
+        hardware_type="NVIDIA_H100",
+        enclave_signature="sig_123",
+        measurement_hash=mixed_hash,
+        status="TRUSTED",
+    )
+    assert report.measurement_hash == mixed_hash
 
 
 def test_attestation_report_invalid_hash_length() -> None:
