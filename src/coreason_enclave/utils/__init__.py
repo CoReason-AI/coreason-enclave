@@ -8,10 +8,6 @@
 #
 # Source Code: https://github.com/CoReason-AI/coreason_enclave
 
-"""
-Utils module.
-"""
-
-from .logger import logger
+from coreason_enclave.utils.logger import logger
 
 __all__ = ["logger"]

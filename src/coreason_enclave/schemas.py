@@ -1,2 +1,109 @@
+# Copyright (c) 2025 CoReason, Inc.
+#
+# This software is proprietary and dual-licensed.
+# Licensed under the Prosperity Public License 3.0 (the "License").
+# A copy of the license is available at https://prosperitylicense.com/versions/3.0.0
+# For details, see the LICENSE file.
+# Commercial use beyond a 30-day trial requires a separate license.
+#
+# Source Code: https://github.com/CoReason-AI/coreason_enclave
 
+from enum import Enum
+from typing import List, Literal
+from uuid import UUID
+
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+
+class AggregationStrategy(str, Enum):
+    """Strategy for aggregating model updates in Federated Learning."""
+
+    FED_AVG = "FED_AVG"  # Standard averaging
+    FED_PROX = "FED_PROX"  # Handles non-IID data
+    SCAFFOLD = "SCAFFOLD"  # Controls client drift
+
+
+class PrivacyConfig(BaseModel):
+    """Configuration for Differential Privacy (DP-SGD)."""
+
+    mechanism: str = Field(default="DP_SGD", description="Privacy mechanism to use")
+    noise_multiplier: float = Field(..., description="Amount of noise to add")
+    max_grad_norm: float = Field(..., description="Maximum gradient norm for clipping")
+    target_epsilon: float = Field(..., description="Target privacy budget (epsilon)")
+
+    @field_validator("noise_multiplier")
+    @classmethod
+    def validate_noise_multiplier(cls, v: float) -> float:
+        if v < 0:
+            raise ValueError("noise_multiplier must be non-negative")
+        return v
+
+    @field_validator("max_grad_norm")
+    @classmethod
+    def validate_max_grad_norm(cls, v: float) -> float:
+        if v <= 0:
+            raise ValueError("max_grad_norm must be positive")
+        return v
+
+    @field_validator("target_epsilon")
+    @classmethod
+    def validate_target_epsilon(cls, v: float) -> float:
+        if v <= 0:
+            raise ValueError("target_epsilon must be positive")
+        return v
+
+
+class FederationJob(BaseModel):
+    """Definition of a Federated Learning job."""
+
+    job_id: UUID
+    clients: List[str] = Field(..., description="List of participating client node IDs")
+    min_clients: int = Field(..., description="Minimum number of clients required")
+    rounds: int = Field(..., description="Number of training rounds")
+    strategy: AggregationStrategy
+    privacy: PrivacyConfig
+
+    @field_validator("rounds")
+    @classmethod
+    def validate_rounds(cls, v: int) -> int:
+        if not (1 <= v <= 10000):
+            raise ValueError("rounds must be between 1 and 10000")
+        return v
+
+    @field_validator("clients")
+    @classmethod
+    def validate_clients_unique(cls, v: List[str]) -> List[str]:
+        if len(v) != len(set(v)):
+            raise ValueError("clients list must contain unique node IDs")
+        return v
+
+    @model_validator(mode="after")
+    def validate_min_clients_logic(self) -> "FederationJob":
+        if self.min_clients < 1:
+            raise ValueError("min_clients must be at least 1")
+        if self.min_clients > len(self.clients):
+            raise ValueError("min_clients cannot be greater than the number of available clients")
+        return self
+
+
+class AttestationReport(BaseModel):
+    """Report from the Trusted Execution Environment (TEE)."""
+
+    node_id: str
+    hardware_type: str = Field(..., description="e.g. NVIDIA_H100_HOPPER")
+    enclave_signature: str = Field(..., description="The hardware quote")
+    measurement_hash: str = Field(..., description="SHA256 of the running binary")
     status: Literal["TRUSTED", "UNTRUSTED"]
+
+    @field_validator("measurement_hash")
+    @classmethod
+    def validate_hash_format(cls, v: str) -> str:
+        # Check length for SHA256 hex string (64 characters)
+        if len(v) != 64:
+            raise ValueError("measurement_hash must be a 64-character hex string (SHA256)")
+        # Check if it contains only hex characters
+        try:
+            int(v, 16)
+        except ValueError as e:
+            raise ValueError("measurement_hash must contain only hexadecimal characters") from e
+        return v
