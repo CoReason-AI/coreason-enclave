@@ -34,20 +34,38 @@ def test_simulation_provider_generates_valid_report() -> None:
     assert len(report.enclave_signature) > 0
 
 
-def test_factory_returns_simulation_provider_when_env_set() -> None:
-    """Test that the factory returns simulation provider when env var is set."""
-    with patch.dict(os.environ, {"COREASON_ENCLAVE_SIMULATION": "true"}):
-        provider = get_attestation_provider()
-        assert isinstance(provider, SimulationAttestationProvider)
+def test_simulation_provider_uniqueness() -> None:
+    """Test that subsequent calls to simulation provider generate unique IDs."""
+    provider = SimulationAttestationProvider()
+    report1 = provider.attest()
+    report2 = provider.attest()
+
+    assert report1.node_id != report2.node_id
+    assert report1.enclave_signature != report2.enclave_signature
+
+
+def test_factory_returns_simulation_provider_case_insensitive() -> None:
+    """Test that the factory handles 'TRUE', 'True', 'true' correctly."""
+    cases = ["true", "True", "TRUE", "TrUe"]
+    for case in cases:
+        with patch.dict(os.environ, {"COREASON_ENCLAVE_SIMULATION": case}):
+            provider = get_attestation_provider()
+            assert isinstance(provider, SimulationAttestationProvider), f"Failed for value: {case}"
+
+
+def test_factory_defaults_to_real_on_invalid_simulation_flag() -> None:
+    """Test that ambiguous values (yes, 1, on) default to Real mode for safety."""
+    invalid_cases = ["yes", "1", "on", "enable", "false", "", "random"]
+    for case in invalid_cases:
+        with patch.dict(os.environ, {"COREASON_ENCLAVE_SIMULATION": case}):
+            provider = get_attestation_provider()
+            assert isinstance(provider, RealAttestationProvider), f"Failed for value: {case}"
 
 
 def test_factory_returns_real_provider_by_default() -> None:
     """Test that the factory returns real provider when env var is NOT set."""
     # Ensure env var is not present
     with patch.dict(os.environ, {}, clear=True):
-        # We need to preserve PATH and other base envs if necessary, but clearing SIMULATION is key.
-        # However, clearing everything might break things if code relies on other envs.
-        # Safer: ensure the specific key is missing.
         if "COREASON_ENCLAVE_SIMULATION" in os.environ:
             del os.environ["COREASON_ENCLAVE_SIMULATION"]
 
@@ -75,3 +93,28 @@ def test_real_provider_raises_not_implemented_with_hardware() -> None:
         with pytest.raises(NotImplementedError) as excinfo:
             provider.attest()
         assert "not yet implemented" in str(excinfo.value)
+
+
+def test_real_provider_device_priority() -> None:
+    """
+    Test that RealAttestationProvider checks devices in order.
+    We mock os.path.exists to fail the first one but pass the second.
+    """
+    provider = RealAttestationProvider()
+
+    # Devices list in code: ["/dev/sgx_enclave", "/dev/sev", "/dev/tdx"]
+    # We simulate sgx missing, but sev present.
+    def mock_exists(path: str) -> bool:
+        if path == "/dev/sgx_enclave":
+            return False
+        if path == "/dev/sev":
+            return True
+        return False
+
+    with patch("os.path.exists", side_effect=mock_exists):
+        # Should NOT raise RuntimeError (hardware not found)
+        # Should raise NotImplementedError (because we found hardware but logic isn't done)
+        with pytest.raises(NotImplementedError) as excinfo:
+            provider.attest()
+        # Verify it passed the hardware check
+        assert "No TEE hardware detected" not in str(excinfo.value)
