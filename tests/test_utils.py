@@ -38,6 +38,9 @@ def test_logger_exports() -> None:
 
 def test_logger_directory_creation() -> None:
     """Test that the logger module creates the logs directory if it doesn't exist."""
+    # Remove all handlers to release file locks on Windows
+    logger.remove()
+
     # Remove the logs directory if it exists
     log_path = Path("logs")
     if log_path.exists():
