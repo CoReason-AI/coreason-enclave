@@ -12,6 +12,7 @@ import os
 from unittest.mock import patch
 
 import pytest
+
 from coreason_enclave.hardware import (
     RealAttestationProvider,
     SimulationAttestationProvider,
