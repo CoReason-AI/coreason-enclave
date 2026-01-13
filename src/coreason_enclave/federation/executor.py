@@ -8,6 +8,16 @@
 #
 # Source Code: https://github.com/CoReason-AI/coreason_enclave
 
+import sys
+from unittest.mock import MagicMock
+
+# NVFlare 2.7.1 has an issue on Windows where it imports 'resource' (Unix-only).
+# We mock it here to allow usage on Windows.
+if sys.platform == "win32":  # pragma: no cover
+    try:
+        import resource  # type: ignore # noqa: F401
+    except ImportError:
+        sys.modules["resource"] = MagicMock()
 
 from nvflare.apis.executor import Executor
 from nvflare.apis.fl_context import FLContext
