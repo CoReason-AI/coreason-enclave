@@ -60,6 +60,8 @@ class DataSentry:
         """
         self.validator = validator
         self.allowed_output_keys = {"params", "metrics", "meta"}
+        # Blocklist for sensitive keys that should NEVER appear, even nested.
+        self.sensitive_keys = {"private_key", "secret", "patient_id", "raw_data", "pii"}
         logger.info("DataSentry initialized.")
 
     def validate_input(self, dataset_id: str, schema: Any) -> bool:
@@ -75,20 +77,34 @@ class DataSentry:
 
         Raises:
             FileNotFoundError: If the data path does not exist.
-            ValueError: If validation fails.
+            ValueError: If validation fails or path traversal is detected.
         """
         data_root = os.environ.get("COREASON_DATA_ROOT", ".")
-        data_path = Path(data_root) / dataset_id
+        root_path = Path(data_root).resolve()
 
-        logger.info(f"Validating input data at: {data_path}")
+        # Prevent Path Traversal
+        # We join the path and resolve it to get the absolute path
+        # Then we check if it starts with the root path
+        try:
+            full_path = (Path(data_root) / dataset_id).resolve()
+        except Exception as e:
+            # Handle edge cases where resolve fails or path is malformed
+            logger.error(f"Failed to resolve path for {dataset_id}: {e}")
+            raise ValueError(f"Invalid dataset_id format: {dataset_id}") from e
 
-        if not data_path.exists():
-            logger.error(f"Data path not found: {data_path}")
-            raise FileNotFoundError(f"Data path not found: {data_path}")
+        if not str(full_path).startswith(str(root_path)):
+            logger.error(f"Path traversal attempt detected! {dataset_id} -> {full_path}")
+            raise ValueError(f"Invalid dataset_id: Path traversal detected for {dataset_id}")
+
+        logger.info(f"Validating input data at: {full_path}")
+
+        if not full_path.exists():
+            logger.error(f"Data path not found: {full_path}")
+            raise FileNotFoundError(f"Data path not found: {full_path}")
 
         # Delegate to the external validator
         try:
-            is_valid = self.validator.validate(str(data_path), schema)
+            is_valid = self.validator.validate(str(full_path), schema)
             if not is_valid:
                 logger.error(f"Validation failed for dataset: {dataset_id}")
                 return False
@@ -103,6 +119,7 @@ class DataSentry:
         """
         Sanitize the output payload ("Airlock").
         Ensures only allowed keys and types exit the enclave.
+        Performs recursive checking to prevent nested data leakage.
 
         Args:
             payload: The dictionary to be sent out of the enclave.
@@ -118,12 +135,31 @@ class DataSentry:
         sanitized: Dict[str, Any] = {}
 
         for key, value in payload.items():
+            # 1. Top-level Allowlist Check
             if key not in self.allowed_output_keys:
                 logger.warning(f"Blocking unauthorized output key: {key}")
                 raise DataLeakageError(f"Unauthorized output key detected: {key}")
 
-            # Deep inspection could go here (e.g., checking for PII in strings)
-            # For now, we pass the allowed keys.
-            sanitized[key] = value
+            # 2. Recursive Sensitivity Check
+            sanitized[key] = self._sanitize_recursive(value)
 
         return sanitized
+
+    def _sanitize_recursive(self, value: Any) -> Any:
+        """
+        Recursively traverse the value to check for sensitive keys in nested dictionaries.
+        """
+        if isinstance(value, dict):
+            clean_dict = {}
+            for k, v in value.items():
+                if k in self.sensitive_keys:
+                    logger.critical(f"Sensitive key detected in nested output: {k}")
+                    raise DataLeakageError(f"Sensitive key detected in nested output: {k}")
+                clean_dict[k] = self._sanitize_recursive(v)
+            return clean_dict
+
+        elif isinstance(value, (list, tuple)):
+            return [self._sanitize_recursive(v) for v in value]
+
+        else:
+            return value
