@@ -96,7 +96,7 @@ class TestDataSentry:
         with patch.dict(os.environ, {"COREASON_DATA_ROOT": str(root_dir)}):
             # Try to access ../database/secret.txt
             # If using 'startswith', this might pass if resolved path is /tmp/database/secret.txt
-            # and root is /tmp/data. Wait, /tmp/database does NOT start with /tmp/data (unless trailing slash handling is weird).
+            # and root is /tmp/data. Wait, /tmp/database does NOT start with /tmp/data.
             # But standard Partial Path Traversal usually is root="/var/www", target="/var/www_backup".
 
             # Let's create a scenario where startswith WOULD fail.
