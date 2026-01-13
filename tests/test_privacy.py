@@ -8,7 +8,7 @@
 #
 # Source Code: https://github.com/CoReason-AI/coreason_enclave
 
-from typing import Tuple
+from typing import Any, Tuple, cast
 
 import pytest
 import torch
@@ -18,7 +18,7 @@ from coreason_enclave.privacy import PrivacyBudgetExceededError, PrivacyGuard
 from coreason_enclave.schemas import PrivacyConfig
 
 
-@pytest.fixture  # type: ignore
+@pytest.fixture
 def valid_privacy_config() -> PrivacyConfig:
     return PrivacyConfig(
         mechanism="DP_SGD",
@@ -28,8 +28,8 @@ def valid_privacy_config() -> PrivacyConfig:
     )
 
 
-@pytest.fixture  # type: ignore
-def simple_model_optimizer_dataloader() -> Tuple[torch.nn.Module, torch.optim.Optimizer, DataLoader]:
+@pytest.fixture
+def simple_model_optimizer_dataloader() -> Tuple[torch.nn.Module, torch.optim.Optimizer, DataLoader[Any]]:
     model = torch.nn.Linear(10, 1)
     optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
     data = torch.randn(100, 10)
@@ -48,7 +48,7 @@ def test_privacy_guard_initialization(valid_privacy_config: PrivacyConfig) -> No
 
 def test_privacy_guard_attach(
     valid_privacy_config: PrivacyConfig,
-    simple_model_optimizer_dataloader: Tuple[torch.nn.Module, torch.optim.Optimizer, DataLoader],
+    simple_model_optimizer_dataloader: Tuple[torch.nn.Module, torch.optim.Optimizer, DataLoader[Any]],
 ) -> None:
     guard = PrivacyGuard(valid_privacy_config)
     model, optimizer, dataloader = simple_model_optimizer_dataloader
@@ -64,7 +64,7 @@ def test_privacy_guard_attach(
 
 def test_privacy_budget_tracking(
     valid_privacy_config: PrivacyConfig,
-    simple_model_optimizer_dataloader: Tuple[torch.nn.Module, torch.optim.Optimizer, DataLoader],
+    simple_model_optimizer_dataloader: Tuple[torch.nn.Module, torch.optim.Optimizer, DataLoader[Any]],
 ) -> None:
     # Use a standard noise multiplier.
 
@@ -85,7 +85,7 @@ def test_privacy_budget_tracking(
     p_optimizer.zero_grad()
     outputs = p_model(inputs)
     loss = torch.nn.functional.mse_loss(outputs, targets)
-    loss.backward()
+    cast(Any, loss).backward()
     p_optimizer.step()
 
     step_epsilon = guard.get_current_epsilon(delta)
@@ -95,7 +95,7 @@ def test_privacy_budget_tracking(
 
 
 def test_privacy_budget_exceeded(
-    simple_model_optimizer_dataloader: Tuple[torch.nn.Module, torch.optim.Optimizer, DataLoader],
+    simple_model_optimizer_dataloader: Tuple[torch.nn.Module, torch.optim.Optimizer, DataLoader[Any]],
 ) -> None:
     # Set a very low target epsilon but reasonable noise
     # We want to exceed target epsilon (e.g. 0.0001) but stay under hard limit (5.0)
@@ -115,7 +115,7 @@ def test_privacy_budget_exceeded(
     p_optimizer.zero_grad()
     outputs = p_model(inputs)
     loss = torch.nn.functional.mse_loss(outputs, targets)
-    loss.backward()
+    cast(Any, loss).backward()
     p_optimizer.step()
 
     # Check budget should fail
@@ -128,7 +128,7 @@ def test_privacy_budget_exceeded(
 
 
 def test_hard_limit_exceeded(
-    simple_model_optimizer_dataloader: Tuple[torch.nn.Module, torch.optim.Optimizer, DataLoader],
+    simple_model_optimizer_dataloader: Tuple[torch.nn.Module, torch.optim.Optimizer, DataLoader[Any]],
 ) -> None:
     # Test the hard limit of 5.0
     # We set target epsilon > 5.0 to bypass the target check,
@@ -155,7 +155,7 @@ def test_hard_limit_exceeded(
         p_optimizer.zero_grad()
         outputs = p_model(inputs)
         loss = torch.nn.functional.mse_loss(outputs, targets)
-        loss.backward()
+        cast(Any, loss).backward()
         p_optimizer.step()
         if guard.get_current_epsilon() > 5.1:
             break
