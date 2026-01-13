@@ -21,7 +21,7 @@ if sys.platform == "win32":  # pragma: no cover
 
 from nvflare.apis.executor import Executor
 from nvflare.apis.fl_context import FLContext
-from nvflare.apis.shareable import Shareable
+from nvflare.apis.shareable import ReturnCode, Shareable, make_reply
 from nvflare.apis.signal import Signal
 
 from coreason_enclave.utils.logger import logger
@@ -71,11 +71,15 @@ class CoreasonExecutor(Executor):  # type: ignore[misc]
         """
         logger.info(f"Received task: {task_name}")
 
-        if task_name == self.training_task_name:
-            return self._execute_training(shareable, fl_ctx, abort_signal)
+        try:
+            if task_name == self.training_task_name:
+                return self._execute_training(shareable, fl_ctx, abort_signal)
 
-        logger.warning(f"Unknown task: {task_name}")
-        return Shareable()
+            logger.warning(f"Unknown task: {task_name}")
+            return make_reply(ReturnCode.TASK_UNKNOWN)
+        except Exception as e:
+            logger.exception(f"Execution failed for task {task_name}: {e}")
+            return make_reply(ReturnCode.EXECUTION_EXCEPTION)
 
     def _execute_training(
         self,

@@ -12,7 +12,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from nvflare.apis.fl_context import FLContext
-from nvflare.apis.shareable import Shareable
+from nvflare.apis.shareable import ReturnCode, Shareable
 from nvflare.apis.signal import Signal
 
 from coreason_enclave.federation.executor import CoreasonExecutor
@@ -47,8 +47,7 @@ class TestCoreasonExecutor:
         shareable = Shareable()
         result = executor.execute("unknown_task", shareable, mock_fl_ctx, mock_signal)
         assert isinstance(result, Shareable)
-        # Should return empty shareable or error, depending on logic.
-        # Current logic returns empty Shareable.
+        assert result.get_return_code() == ReturnCode.TASK_UNKNOWN
 
     def test_execute_training_task(
         self,
@@ -60,6 +59,8 @@ class TestCoreasonExecutor:
         shareable = Shareable()
         result = executor.execute("train_task", shareable, mock_fl_ctx, mock_signal)
         assert isinstance(result, Shareable)
+        # Default implementation just returns Shareable(), implying OK if not set?
+        # nvflare default shareable is OK.
 
     def test_abort_signal(
         self,
@@ -72,3 +73,42 @@ class TestCoreasonExecutor:
         shareable = Shareable()
         result = executor.execute("train_task", shareable, mock_fl_ctx, mock_signal)
         assert isinstance(result, Shareable)
+
+    def test_execute_exception_handling(
+        self,
+        executor: CoreasonExecutor,
+        mock_fl_ctx: MagicMock,
+        mock_signal: MagicMock,
+    ) -> None:
+        """Test that exceptions during execution are caught and handled."""
+        shareable = Shareable()
+        # Mock _execute_training to raise an exception
+        executor._execute_training = MagicMock(side_effect=RuntimeError("Training failed"))  # type: ignore
+
+        result = executor.execute("train_task", shareable, mock_fl_ctx, mock_signal)
+        assert isinstance(result, Shareable)
+        assert result.get_return_code() == ReturnCode.EXECUTION_EXCEPTION
+
+    def test_edge_case_empty_task_name(
+        self,
+        executor: CoreasonExecutor,
+        mock_fl_ctx: MagicMock,
+        mock_signal: MagicMock,
+    ) -> None:
+        """Test execution with an empty task name."""
+        shareable = Shareable()
+        result = executor.execute("", shareable, mock_fl_ctx, mock_signal)
+        assert result.get_return_code() == ReturnCode.TASK_UNKNOWN
+
+    def test_configuration_edge_case(
+        self,
+        mock_fl_ctx: MagicMock,
+        mock_signal: MagicMock,
+    ) -> None:
+        """Test weird configuration: same name for training and aggregation."""
+        executor = CoreasonExecutor(training_task_name="same_name", aggregation_task_name="same_name")
+        shareable = Shareable()
+        # Should behave as training since it's the first check
+        result = executor.execute("same_name", shareable, mock_fl_ctx, mock_signal)
+        # Since _execute_training succeeds (returns Shareable()), result RC should be OK (default)
+        assert result.get_return_code() == ReturnCode.OK
