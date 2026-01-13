@@ -52,8 +52,8 @@ class PrivacyGuard:
         self,
         model: torch.nn.Module,
         optimizer: torch.optim.Optimizer,
-        data_loader: DataLoader,
-    ) -> Tuple[torch.nn.Module, torch.optim.Optimizer, DataLoader]:
+        data_loader: DataLoader[Any],
+    ) -> Tuple[torch.nn.Module, torch.optim.Optimizer, DataLoader[Any]]:
         """
         Attach the Privacy Engine to the PyTorch components.
         This wraps the optimizer to perform gradient clipping and noise addition.

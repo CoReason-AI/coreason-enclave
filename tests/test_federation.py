@@ -19,15 +19,15 @@ from coreason_enclave.federation.executor import CoreasonExecutor
 
 
 class TestCoreasonExecutor:
-    @pytest.fixture  # type: ignore[misc]
+    @pytest.fixture
     def executor(self) -> CoreasonExecutor:
         return CoreasonExecutor(training_task_name="train_task")
 
-    @pytest.fixture  # type: ignore[misc]
+    @pytest.fixture
     def mock_fl_ctx(self) -> MagicMock:
         return MagicMock(spec=FLContext)
 
-    @pytest.fixture  # type: ignore[misc]
+    @pytest.fixture
     def mock_signal(self) -> MagicMock:
         signal = MagicMock(spec=Signal)
         signal.triggered = False
