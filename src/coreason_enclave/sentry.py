@@ -92,7 +92,9 @@ class DataSentry:
             logger.error(f"Failed to resolve path for {dataset_id}: {e}")
             raise ValueError(f"Invalid dataset_id format: {dataset_id}") from e
 
-        if not str(full_path).startswith(str(root_path)):
+        # Secure check using pathlib's is_relative_to (Python 3.9+)
+        # This prevents partial path traversal attacks (e.g. /data vs /database)
+        if not full_path.is_relative_to(root_path):
             logger.error(f"Path traversal attempt detected! {dataset_id} -> {full_path}")
             raise ValueError(f"Invalid dataset_id: Path traversal detected for {dataset_id}")
 
@@ -134,14 +136,18 @@ class DataSentry:
 
         sanitized: Dict[str, Any] = {}
 
-        for key, value in payload.items():
-            # 1. Top-level Allowlist Check
-            if key not in self.allowed_output_keys:
-                logger.warning(f"Blocking unauthorized output key: {key}")
-                raise DataLeakageError(f"Unauthorized output key detected: {key}")
+        try:
+            for key, value in payload.items():
+                # 1. Top-level Allowlist Check
+                if key not in self.allowed_output_keys:
+                    logger.warning(f"Blocking unauthorized output key: {key}")
+                    raise DataLeakageError(f"Unauthorized output key detected: {key}")
 
-            # 2. Recursive Sensitivity Check
-            sanitized[key] = self._sanitize_recursive(value)
+                # 2. Recursive Sensitivity Check
+                sanitized[key] = self._sanitize_recursive(value)
+        except RecursionError as e:
+            logger.error(f"Recursion depth exceeded during sanitation: {e}")
+            raise DataLeakageError("Payload too deep or contains circular references") from e
 
         return sanitized
 

@@ -9,12 +9,12 @@
 # Source Code: https://github.com/CoReason-AI/coreason_enclave
 
 import os
+import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Dict
 from unittest.mock import MagicMock, patch
 
 import pytest
-
 from coreason_enclave.sentry import DataLeakageError, DataSentry, ValidatorProtocol
 
 
@@ -78,6 +78,36 @@ class TestDataSentry:
             with pytest.raises(ValueError, match="Path traversal detected"):
                 sentry.validate_input(traversal_path, schema={})
 
+    def test_validate_input_partial_traversal(self, sentry: DataSentry, tmp_path: Any) -> None:
+        """
+        Test partial path traversal (e.g., /data vs /database).
+        Ensures strict directory containment.
+        """
+        # Create sibling directories
+        root_dir = tmp_path / "data"
+        root_dir.mkdir()
+
+        # Sibling directory that starts with the same prefix
+        sibling_dir = tmp_path / "database"
+        sibling_dir.mkdir()
+        secret_file = sibling_dir / "secret.txt"
+        secret_file.touch()
+
+        with patch.dict(os.environ, {"COREASON_DATA_ROOT": str(root_dir)}):
+            # Try to access ../database/secret.txt
+            # If using 'startswith', this might pass if resolved path is /tmp/database/secret.txt
+            # and root is /tmp/data. Wait, /tmp/database does NOT start with /tmp/data (unless trailing slash handling is weird).
+            # But standard Partial Path Traversal usually is root="/var/www", target="/var/www_backup".
+
+            # Let's create a scenario where startswith WOULD fail.
+            # Root: /tmp/pytest/data
+            # Target: /tmp/pytest/data_backup
+
+            target_path = "../database/secret.txt"
+
+            with pytest.raises(ValueError, match="Path traversal detected"):
+                sentry.validate_input(target_path, schema={})
+
     def test_validate_input_absolute_path_outside_root(self, sentry: DataSentry, tmp_path: Any) -> None:
         """Test that absolute paths pointing outside root are blocked."""
         root_dir = tmp_path / "allowed_root"
@@ -94,6 +124,31 @@ class TestDataSentry:
 
             with pytest.raises(ValueError, match="Path traversal detected"):
                 sentry.validate_input(str(outside_file), schema={})
+
+    def test_validate_input_symlink_attack(self, sentry: DataSentry, tmp_path: Any) -> None:
+        """
+        Test that a symlink inside the root pointing to a file outside the root is blocked.
+        """
+        root_dir = tmp_path / "allowed_root"
+        root_dir.mkdir()
+
+        outside_file = tmp_path / "secret.txt"
+        outside_file.touch()
+
+        # Create a symlink inside root -> outside
+        # Note: Symlinks might not work on Windows without admin privs.
+        # But our tests run on Linux (Ubuntu).
+        try:
+            symlink_path = root_dir / "link_to_secret"
+            symlink_path.symlink_to(outside_file)
+        except OSError:
+            pytest.skip("Symlinks not supported on this platform")
+
+        with patch.dict(os.environ, {"COREASON_DATA_ROOT": str(root_dir)}):
+            # The resolve() call in sentry should follow the link to outside_file
+            # And startswith check should fail.
+            with pytest.raises(ValueError, match="Path traversal detected"):
+                sentry.validate_input("link_to_secret", schema={})
 
     def test_validate_input_validation_failure(
         self, sentry: DataSentry, mock_validator: MagicMock, tmp_path: Any
@@ -131,13 +186,16 @@ class TestDataSentry:
             # This is tricky because `self` in side_effect is the mock, not the Path object
             # But the mock replaces Path.resolve.
             # We can use an iterator.
-            return next(effects)
+            val = next(effects)
+            if isinstance(val, Exception):
+                raise val
+            return val
 
         # Create an iterator for side effects
         effects = iter([tmp_path, OSError("Disk error")])
 
         with patch.dict(os.environ, {"COREASON_DATA_ROOT": str(tmp_path)}):
-            with patch.object(Path, "resolve", side_effect=effects):
+            with patch.object(Path, "resolve", side_effect=side_effect):
                 with pytest.raises(ValueError, match="Invalid dataset_id format"):
                     sentry.validate_input("some_id", schema={})
 
@@ -196,6 +254,42 @@ class TestDataSentry:
         }
         with pytest.raises(DataLeakageError, match="Sensitive key detected in nested output: patient_id"):
             sentry.sanitize_output(payload)
+
+    def test_sanitize_output_circular_reference(self, sentry: DataSentry) -> None:
+        """
+        Test that circular references are detected/handled via recursion depth limit.
+        """
+        payload: Dict[str, Any] = {"meta": {}}
+        # Create a cycle
+        payload["meta"]["self"] = payload
+
+        # We need to rely on Python's recursion limit triggering RecursionError
+        # To make the test faster, we can lower the recursion limit temporarily
+        original_limit = sys.getrecursionlimit()
+        sys.setrecursionlimit(200)
+        try:
+            with pytest.raises(DataLeakageError, match="Payload too deep or contains circular references"):
+                sentry.sanitize_output(payload)
+        finally:
+            sys.setrecursionlimit(original_limit)
+
+    def test_sanitize_output_deep_recursion(self, sentry: DataSentry) -> None:
+        """Test a very deep payload that might exceed recursion limit."""
+        # Create a nested dict 2000 levels deep
+        deep_payload: Dict[str, Any] = {"leaf": 1}
+        for _ in range(2000):
+            deep_payload = {"level": deep_payload}
+
+        payload = {"meta": deep_payload}
+
+        original_limit = sys.getrecursionlimit()
+        # Ensure our payload exceeds the limit
+        sys.setrecursionlimit(1000)
+        try:
+            with pytest.raises(DataLeakageError, match="Payload too deep or contains circular references"):
+                sentry.sanitize_output(payload)
+        finally:
+            sys.setrecursionlimit(original_limit)
 
     def test_sanitize_output_empty(self, sentry: DataSentry) -> None:
         """Test empty payload."""

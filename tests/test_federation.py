@@ -11,11 +11,10 @@
 from unittest.mock import MagicMock
 
 import pytest
+from coreason_enclave.federation.executor import CoreasonExecutor
 from nvflare.apis.fl_context import FLContext
 from nvflare.apis.shareable import ReturnCode, Shareable
 from nvflare.apis.signal import Signal
-
-from coreason_enclave.federation.executor import CoreasonExecutor
 
 
 class TestCoreasonExecutor:

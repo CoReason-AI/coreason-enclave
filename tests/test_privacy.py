@@ -12,10 +12,9 @@ from typing import Any, Tuple, cast
 
 import pytest
 import torch
-from torch.utils.data import DataLoader, TensorDataset
-
 from coreason_enclave.privacy import PrivacyBudgetExceededError, PrivacyGuard
 from coreason_enclave.schemas import PrivacyConfig
+from torch.utils.data import DataLoader, TensorDataset
 
 
 @pytest.fixture
