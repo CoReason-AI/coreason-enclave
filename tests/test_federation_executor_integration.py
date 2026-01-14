@@ -237,3 +237,47 @@ class TestCoreasonExecutorSecurity:
 
             result = executor.execute("train_task", valid_shareable, mock_fl_ctx, mock_signal)
             assert result.get_return_code() == ReturnCode.EXECUTION_EXCEPTION
+
+    def test_secure_execution_consecutive_calls(
+        self,
+        executor: CoreasonExecutor,
+        valid_shareable: Shareable,
+        mock_fl_ctx: MagicMock,
+        mock_signal: MagicMock,
+        mock_job_config: Dict[str, Any],
+    ) -> None:
+        """Test consecutive calls: Valid -> Invalid -> Valid."""
+        # Setup Valid
+        executor.sentry = MagicMock()
+        executor.sentry.validate_input.return_value = True
+        executor.sentry.sanitize_output.return_value = {"params": {}}
+
+        # 1. Valid
+        result1 = executor.execute("train_task", valid_shareable, mock_fl_ctx, mock_signal)
+        assert result1.get_return_code() == ReturnCode.OK
+
+        # 2. Invalid (Missing Config)
+        bad_shareable = Shareable()
+        result2 = executor.execute("train_task", bad_shareable, mock_fl_ctx, mock_signal)
+        assert result2.get_return_code() == ReturnCode.BAD_TASK_DATA
+
+        # 3. Valid (Re-use executor)
+        result3 = executor.execute("train_task", valid_shareable, mock_fl_ctx, mock_signal)
+        assert result3.get_return_code() == ReturnCode.OK
+
+    def test_secure_execution_schema_boundary_values(
+        self,
+        executor: CoreasonExecutor,
+        mock_job_config: Dict[str, Any],
+        mock_fl_ctx: MagicMock,
+        mock_signal: MagicMock,
+    ) -> None:
+        """Test config with boundary values that fail schema validation."""
+        mock_job_config["rounds"] = 0  # Invalid
+        shareable = Shareable()
+        shareable.set_header("job_config", json.dumps(mock_job_config))
+
+        executor.sentry = MagicMock()  # Should not be reached but good to mock
+
+        result = executor.execute("train_task", shareable, mock_fl_ctx, mock_signal)
+        assert result.get_return_code() == ReturnCode.BAD_TASK_DATA
