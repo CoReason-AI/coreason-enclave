@@ -92,6 +92,26 @@ class TestCoreasonExecutorSecurity:
         executor.sentry.validate_input.assert_called_once()
         executor.sentry.sanitize_output.assert_called_once()
 
+    def test_secure_execution_dict_config(
+        self,
+        executor: CoreasonExecutor,
+        mock_job_config: Dict[str, Any],
+        mock_fl_ctx: MagicMock,
+        mock_signal: MagicMock,
+    ) -> None:
+        """Test happy path with dict config (not JSON string)."""
+        shareable = Shareable()
+        shareable.set_header("job_config", mock_job_config)
+
+        # Mock DataSentry
+        executor.sentry = MagicMock()
+        executor.sentry.validate_input.return_value = True
+        executor.sentry.sanitize_output.return_value = {"params": {"a": 1}}
+
+        result = executor.execute("train_task", shareable, mock_fl_ctx, mock_signal)
+
+        assert result.get_return_code() == ReturnCode.OK
+
     def test_secure_execution_untrusted_hardware(
         self,
         executor: CoreasonExecutor,
@@ -175,3 +195,45 @@ class TestCoreasonExecutorSecurity:
 
         result = executor.execute("train_task", valid_shareable, mock_fl_ctx, mock_signal)
         assert result.get_return_code() == ReturnCode.EXECUTION_EXCEPTION
+
+    def test_secure_execution_abort_signal(
+        self,
+        executor: CoreasonExecutor,
+        valid_shareable: Shareable,
+        mock_fl_ctx: MagicMock,
+        mock_signal: MagicMock,
+    ) -> None:
+        """Test handling of abort signal during training setup."""
+        # Mock Sentry
+        executor.sentry = MagicMock()
+        executor.sentry.validate_input.return_value = True
+
+        # Trigger abort signal
+        mock_signal.triggered = True
+
+        result = executor.execute("train_task", valid_shareable, mock_fl_ctx, mock_signal)
+
+        # If aborted, it returns an empty Shareable (OK) in current impl
+        assert result.get_return_code() == ReturnCode.OK
+        # Shareable might contain headers even if empty, so we check for empty data dict if applicable,
+        # or just that specific keys are missing.
+        assert not result.get("params")
+
+    def test_secure_execution_privacy_init_failure(
+        self,
+        executor: CoreasonExecutor,
+        valid_shareable: Shareable,
+        mock_fl_ctx: MagicMock,
+        mock_signal: MagicMock,
+    ) -> None:
+        """Test failure when PrivacyGuard cannot be initialized."""
+        # Mock Sentry
+        executor.sentry = MagicMock()
+        executor.sentry.validate_input.return_value = True
+
+        # Mock PrivacyGuard to raise exception
+        with patch("coreason_enclave.federation.executor.PrivacyGuard") as mock_guard:
+            mock_guard.side_effect = ValueError("Invalid privacy config")
+
+            result = executor.execute("train_task", valid_shareable, mock_fl_ctx, mock_signal)
+            assert result.get_return_code() == ReturnCode.EXECUTION_EXCEPTION

@@ -36,7 +36,7 @@ class ValidatorProtocol(Protocol):
         Raises:
             ValueError: If validation fails with specific errors.
         """
-        ...
+        ...  # pragma: no cover
 
 
 class FileExistenceValidator:
