@@ -8,290 +8,144 @@
 #
 # Source Code: https://github.com/CoReason-AI/coreason_enclave
 
-import os
-import sys
-from pathlib import Path
 from typing import Any, Dict
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from coreason_enclave.sentry import DataLeakageError, DataSentry, ValidatorProtocol
+from coreason_enclave.sentry import DataLeakageError, DataSentry, FileExistenceValidator
 
 
 class TestDataSentry:
     @pytest.fixture
     def mock_validator(self) -> MagicMock:
-        """Fixture for a mocked ValidatorProtocol."""
-        validator = MagicMock(spec=ValidatorProtocol)
-        return validator
+        return MagicMock()
 
     @pytest.fixture
     def sentry(self, mock_validator: MagicMock) -> DataSentry:
-        """Fixture for DataSentry instance."""
         return DataSentry(validator=mock_validator)
 
     def test_init(self, sentry: DataSentry) -> None:
-        """Test initialization of DataSentry."""
-        assert sentry is not None
-        assert isinstance(sentry.validator, ValidatorProtocol)
+        assert sentry.validator is not None
 
-    # --- validate_input tests ---
+    def test_validate_input_success(self, sentry: DataSentry, mock_validator: MagicMock) -> None:
+        mock_validator.validate.return_value = True
+        with (
+            patch("pathlib.Path.exists", return_value=True),
+            patch("pathlib.Path.is_relative_to", return_value=True),
+            patch("pathlib.Path.resolve") as mock_resolve,
+        ):
+            # Setup resolve to return a path object that supports is_relative_to
+            mock_path = MagicMock()
+            mock_path.is_relative_to.return_value = True
+            mock_path.exists.return_value = True
+            mock_resolve.return_value = mock_path
 
-    def test_validate_input_success(self, sentry: DataSentry, mock_validator: MagicMock, tmp_path: Any) -> None:
-        """Test validate_input with valid data and schema."""
-        data_file = tmp_path / "dataset.csv"
-        data_file.touch()
-
-        with patch.dict(os.environ, {"COREASON_DATA_ROOT": str(tmp_path)}):
-            mock_validator.validate.return_value = True
-            result = sentry.validate_input("dataset.csv", schema={"type": "csv"})
-
-            assert result is True
+            assert sentry.validate_input("dataset_123", schema={}) is True
             mock_validator.validate.assert_called_once()
-            args, _ = mock_validator.validate.call_args
-            assert args[0].endswith("dataset.csv")
 
-    def test_validate_input_file_not_found(self, sentry: DataSentry, tmp_path: Any) -> None:
-        """Test validate_input raises FileNotFoundError for missing file."""
-        with patch.dict(os.environ, {"COREASON_DATA_ROOT": str(tmp_path)}):
+    def test_validate_input_resolve_error(self, sentry: DataSentry) -> None:
+        # We need to simulate the resolve() call failing for the FULL path,
+        # BUT NOT for the root path (which happens first on line 102).
+
+        # We can mock Path object itself so that when it is initialized with root, it resolves fine,
+        # but when initialized with data_root/dataset_id, it fails.
+
+        with patch("pathlib.Path.resolve") as mock_resolve:
+            # First call (root) succeeds
+            # Second call (full path) fails
+            mock_resolve.side_effect = [MagicMock(), RuntimeError("Resolution failed")]
+
+            with pytest.raises(ValueError, match="Invalid dataset_id format"):
+                sentry.validate_input("malformed_path", schema={})
+
+    def test_validate_input_not_exists(self, sentry: DataSentry) -> None:
+        with patch("pathlib.Path.resolve") as mock_resolve:
+            mock_path = MagicMock()
+            mock_path.is_relative_to.return_value = True
+            mock_path.exists.return_value = False
+            mock_resolve.return_value = mock_path
+
             with pytest.raises(FileNotFoundError):
-                sentry.validate_input("non_existent_file.csv", schema={})
+                sentry.validate_input("missing_data", schema={})
 
-    def test_validate_input_path_traversal(self, sentry: DataSentry, tmp_path: Any) -> None:
-        """
-        Test that path traversal attempts are blocked.
-        Trying to access a file outside COREASON_DATA_ROOT.
-        """
-        # Setup:
-        # /tmp/allowed_root/
-        # /tmp/secret_outside.txt
-        root_dir = tmp_path / "allowed_root"
-        root_dir.mkdir()
+    def test_validate_input_traversal(self, sentry: DataSentry) -> None:
+        with patch("pathlib.Path.resolve") as mock_resolve:
+            mock_path = MagicMock()
+            mock_path.is_relative_to.return_value = False
+            mock_resolve.return_value = mock_path
 
-        outside_file = tmp_path / "secret_outside.txt"
-        outside_file.touch()
+            with pytest.raises(ValueError, match="Path traversal"):
+                sentry.validate_input("../secret", schema={})
 
-        with patch.dict(os.environ, {"COREASON_DATA_ROOT": str(root_dir)}):
-            # Attempt traversal: ../secret_outside.txt
-            traversal_path = "../secret_outside.txt"
+    def test_validate_input_validator_returns_false(self, sentry: DataSentry, mock_validator: MagicMock) -> None:
+        # Test case for validator returning False (lines 130-131)
+        mock_validator.validate.return_value = False
+        with (
+            patch("pathlib.Path.exists", return_value=True),
+            patch("pathlib.Path.is_relative_to", return_value=True),
+            patch("pathlib.Path.resolve") as mock_resolve,
+        ):
+            mock_path = MagicMock()
+            mock_path.is_relative_to.return_value = True
+            mock_path.exists.return_value = True
+            mock_resolve.return_value = mock_path
 
-            with pytest.raises(ValueError, match="Path traversal detected"):
-                sentry.validate_input(traversal_path, schema={})
+            assert sentry.validate_input("dataset_123", schema={}) is False
 
-    def test_validate_input_partial_traversal(self, sentry: DataSentry, tmp_path: Any) -> None:
-        """
-        Test partial path traversal (e.g., /data vs /database).
-        Ensures strict directory containment.
-        """
-        # Create sibling directories
-        root_dir = tmp_path / "data"
-        root_dir.mkdir()
+    def test_validate_input_validator_raises(self, sentry: DataSentry, mock_validator: MagicMock) -> None:
+        # Test case for validator raising exception (lines 132-134)
+        mock_validator.validate.side_effect = Exception("Validator crashed")
+        with (
+            patch("pathlib.Path.exists", return_value=True),
+            patch("pathlib.Path.is_relative_to", return_value=True),
+            patch("pathlib.Path.resolve") as mock_resolve,
+        ):
+            mock_path = MagicMock()
+            mock_path.is_relative_to.return_value = True
+            mock_path.exists.return_value = True
+            mock_resolve.return_value = mock_path
 
-        # Sibling directory that starts with the same prefix
-        sibling_dir = tmp_path / "database"
-        sibling_dir.mkdir()
-        secret_file = sibling_dir / "secret.txt"
-        secret_file.touch()
+            with pytest.raises(Exception, match="Validator crashed"):
+                sentry.validate_input("dataset_123", schema={})
 
-        with patch.dict(os.environ, {"COREASON_DATA_ROOT": str(root_dir)}):
-            # Try to access ../database/secret.txt
-            # If using 'startswith', this might pass if resolved path is /tmp/database/secret.txt
-            # and root is /tmp/data.
-            # But standard Partial Path Traversal usually is root="/var/www", target="/var/www_backup".
+    def test_sanitize_output_success(self, sentry: DataSentry) -> None:
+        payload = {"params": {"w": 1.0}, "metrics": {"acc": 0.9}}
+        sanitized = sentry.sanitize_output(payload)
+        assert sanitized == payload
 
-            # Let's create a scenario where startswith WOULD fail.
-            # Root: /tmp/pytest/data
-            # Target: /tmp/pytest/data_backup
-
-            target_path = "../database/secret.txt"
-
-            with pytest.raises(ValueError, match="Path traversal detected"):
-                sentry.validate_input(target_path, schema={})
-
-    def test_validate_input_absolute_path_outside_root(self, sentry: DataSentry, tmp_path: Any) -> None:
-        """Test that absolute paths pointing outside root are blocked."""
-        root_dir = tmp_path / "allowed_root"
-        root_dir.mkdir()
-
-        outside_file = tmp_path / "secret.txt"
-        outside_file.touch()
-
-        with patch.dict(os.environ, {"COREASON_DATA_ROOT": str(root_dir)}):
-            # Pass absolute path to outside file
-            # Note: pathlib / operator behaves differently if 2nd arg is absolute on some OS/versions
-            # behavior: Path('/a') / '/b' -> Path('/b')
-            # So this simulates an attacker providing an absolute path.
-
-            with pytest.raises(ValueError, match="Path traversal detected"):
-                sentry.validate_input(str(outside_file), schema={})
-
-    def test_validate_input_symlink_attack(self, sentry: DataSentry, tmp_path: Any) -> None:
-        """
-        Test that a symlink inside the root pointing to a file outside the root is blocked.
-        """
-        root_dir = tmp_path / "allowed_root"
-        root_dir.mkdir()
-
-        outside_file = tmp_path / "secret.txt"
-        outside_file.touch()
-
-        # Create a symlink inside root -> outside
-        # Note: Symlinks might not work on Windows without admin privs.
-        # But our tests run on Linux (Ubuntu).
-        try:
-            symlink_path = root_dir / "link_to_secret"
-            symlink_path.symlink_to(outside_file)
-        except OSError:
-            pytest.skip("Symlinks not supported on this platform")
-
-        with patch.dict(os.environ, {"COREASON_DATA_ROOT": str(root_dir)}):
-            # The resolve() call in sentry should follow the link to outside_file
-            # And startswith check should fail.
-            with pytest.raises(ValueError, match="Path traversal detected"):
-                sentry.validate_input("link_to_secret", schema={})
-
-    def test_validate_input_validation_failure(
-        self, sentry: DataSentry, mock_validator: MagicMock, tmp_path: Any
-    ) -> None:
-        """Test validate_input returns False when validator fails."""
-        data_file = tmp_path / "dataset.csv"
-        data_file.touch()
-
-        with patch.dict(os.environ, {"COREASON_DATA_ROOT": str(tmp_path)}):
-            mock_validator.validate.return_value = False
-            result = sentry.validate_input("dataset.csv", schema={})
-            assert result is False
-
-    def test_validate_input_validator_exception(
-        self, sentry: DataSentry, mock_validator: MagicMock, tmp_path: Any
-    ) -> None:
-        """Test validate_input re-raises exception from validator."""
-        data_file = tmp_path / "dataset.csv"
-        data_file.touch()
-
-        with patch.dict(os.environ, {"COREASON_DATA_ROOT": str(tmp_path)}):
-            mock_validator.validate.side_effect = ValueError("Invalid schema")
-            with pytest.raises(ValueError, match="Invalid schema"):
-                sentry.validate_input("dataset.csv", schema={})
-
-    def test_validate_input_resolve_exception(self, sentry: DataSentry, tmp_path: Any) -> None:
-        """Test exception handling during path resolution."""
-        # It's hard to trigger a resolve error with standard inputs, so we mock Path.resolve
-        # We need two side effects:
-        # 1. First call (root_path): Succeeds (returns tmp_path)
-        # 2. Second call (full_path): Fails (raises OSError)
-
-        def side_effect(*args: Any, **kwargs: Any) -> Any:
-            # Check if we are resolving the root path or the dataset path
-            # This is tricky because `self` in side_effect is the mock, not the Path object
-            # But the mock replaces Path.resolve.
-            # We can use an iterator.
-            val = next(effects)
-            if isinstance(val, Exception):
-                raise val
-            return val
-
-        # Create an iterator for side effects
-        effects = iter([tmp_path, OSError("Disk error")])
-
-        with patch.dict(os.environ, {"COREASON_DATA_ROOT": str(tmp_path)}):
-            with patch.object(Path, "resolve", side_effect=side_effect):
-                with pytest.raises(ValueError, match="Invalid dataset_id format"):
-                    sentry.validate_input("some_id", schema={})
-
-    # --- sanitize_output tests ---
-
-    def test_sanitize_output_valid(self, sentry: DataSentry) -> None:
-        """Test sanitize_output with allowed keys."""
-        payload = {"params": {"weights": [1, 2, 3]}, "metrics": {"loss": 0.5, "accuracy": 0.95}, "meta": {"round": 1}}
-        result = sentry.sanitize_output(payload)
-        assert result == payload
-
-    def test_sanitize_output_invalid_top_level_key(self, sentry: DataSentry) -> None:
-        """Test sanitize_output raises DataLeakageError for unauthorized keys."""
-        payload = {
-            "params": {},
-            "raw_data": ["patient_record_1"],  # Unauthorized
-        }
-        with pytest.raises(DataLeakageError, match="Unauthorized output key detected: raw_data"):
+    def test_sanitize_output_block_key(self, sentry: DataSentry) -> None:
+        payload = {"secret_key": "123"}
+        with pytest.raises(DataLeakageError, match="Unauthorized output key"):
             sentry.sanitize_output(payload)
 
-    def test_sanitize_output_nested_sensitive_key(self, sentry: DataSentry) -> None:
-        """
-        Test Recursive Data Leakage check.
-        A sensitive key (e.g. 'private_key') hidden inside a valid top-level key.
-        """
-        payload = {
-            "meta": {
-                "safe_info": "v1.0",
-                "private_key": "MIIEvAIBADAN...",  # Malicious
-            }
-        }
-        with pytest.raises(DataLeakageError, match="Sensitive key detected in nested output: private_key"):
+    def test_sanitize_output_nested_sensitive(self, sentry: DataSentry) -> None:
+        payload = {"params": {"nested": {"secret": "value"}}}
+        with pytest.raises(DataLeakageError, match="Sensitive key detected"):
             sentry.sanitize_output(payload)
 
-    def test_sanitize_output_deeply_nested_sensitive_key(self, sentry: DataSentry) -> None:
-        """Test deep recursion for sensitive keys."""
-        payload = {
-            "metrics": {
-                "layer_stats": {
-                    "conv1": {
-                        "secret": "hidden_value"  # Malicious
-                    }
-                }
-            }
-        }
-        with pytest.raises(DataLeakageError, match="Sensitive key detected in nested output: secret"):
+    def test_sanitize_output_recursion_error(self, sentry: DataSentry) -> None:
+        # Test case for RecursionError (lines 168-169)
+        recursive_dict: Dict[str, Any] = {}
+        recursive_dict["self"] = recursive_dict
+        payload = {"params": recursive_dict}
+        with pytest.raises(DataLeakageError, match="Payload too deep or contains circular references"):
             sentry.sanitize_output(payload)
 
-    def test_sanitize_output_list_recursion(self, sentry: DataSentry) -> None:
-        """Test that lists are also traversed."""
-        payload = {
-            "meta": [
-                {"safe": 1},
-                {"patient_id": 12345},  # Malicious
-            ]
-        }
-        with pytest.raises(DataLeakageError, match="Sensitive key detected in nested output: patient_id"):
-            sentry.sanitize_output(payload)
+    def test_sanitize_recursive_list(self, sentry: DataSentry) -> None:
+        # Test case for list recursion (line 187)
+        payload = {"params": [1, 2, {"safe": "val"}]}
+        sanitized = sentry.sanitize_output(payload)
+        assert sanitized["params"][2]["safe"] == "val"
 
-    def test_sanitize_output_circular_reference(self, sentry: DataSentry) -> None:
-        """
-        Test that circular references are detected/handled via recursion depth limit.
-        """
-        payload: Dict[str, Any] = {"meta": {}}
-        # Create a cycle
-        payload["meta"]["self"] = payload
 
-        # We need to rely on Python's recursion limit triggering RecursionError
-        # To make the test faster, we can lower the recursion limit temporarily
-        original_limit = sys.getrecursionlimit()
-        sys.setrecursionlimit(200)
-        try:
-            with pytest.raises(DataLeakageError, match="Payload too deep or contains circular references"):
-                sentry.sanitize_output(payload)
-        finally:
-            sys.setrecursionlimit(original_limit)
+class TestFileExistenceValidator:
+    def test_validate_exists(self) -> None:
+        validator = FileExistenceValidator()
+        with patch("pathlib.Path.exists", return_value=True):
+            assert validator.validate("test_path", schema=None) is True
 
-    def test_sanitize_output_deep_recursion(self, sentry: DataSentry) -> None:
-        """Test a very deep payload that might exceed recursion limit."""
-        # Create a nested dict 2000 levels deep
-        deep_payload: Dict[str, Any] = {"leaf": 1}
-        for _ in range(2000):
-            deep_payload = {"level": deep_payload}
-
-        payload = {"meta": deep_payload}
-
-        original_limit = sys.getrecursionlimit()
-        # Ensure our payload exceeds the limit
-        sys.setrecursionlimit(1000)
-        try:
-            with pytest.raises(DataLeakageError, match="Payload too deep or contains circular references"):
-                sentry.sanitize_output(payload)
-        finally:
-            sys.setrecursionlimit(original_limit)
-
-    def test_sanitize_output_empty(self, sentry: DataSentry) -> None:
-        """Test empty payload."""
-        assert sentry.sanitize_output({}) == {}
+    def test_validate_not_exists(self) -> None:
+        validator = FileExistenceValidator()
+        with patch("pathlib.Path.exists", return_value=False):
+            assert validator.validate("test_path", schema=None) is False

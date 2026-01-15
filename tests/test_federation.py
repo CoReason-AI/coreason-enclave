@@ -8,7 +8,10 @@
 #
 # Source Code: https://github.com/CoReason-AI/coreason_enclave
 
-from unittest.mock import MagicMock
+import json
+import uuid
+from typing import Any, Dict, Generator
+from unittest.mock import MagicMock, patch
 
 import pytest
 from nvflare.apis.fl_context import FLContext
@@ -16,11 +19,26 @@ from nvflare.apis.shareable import ReturnCode, Shareable
 from nvflare.apis.signal import Signal
 
 from coreason_enclave.federation.executor import CoreasonExecutor
+from coreason_enclave.schemas import AttestationReport
 
 
 class TestCoreasonExecutor:
     @pytest.fixture
-    def executor(self) -> CoreasonExecutor:
+    def mock_attestation_provider(self) -> Generator[MagicMock, None, None]:
+        with patch("coreason_enclave.federation.executor.get_attestation_provider") as mock_get:
+            provider = MagicMock()
+            mock_get.return_value = provider
+            provider.attest.return_value = AttestationReport(
+                node_id="test_node",
+                hardware_type="SIMULATION",
+                enclave_signature="sig",
+                measurement_hash="0" * 64,
+                status="TRUSTED",
+            )
+            yield provider
+
+    @pytest.fixture
+    def executor(self, mock_attestation_provider: MagicMock) -> CoreasonExecutor:
         return CoreasonExecutor(training_task_name="train_task")
 
     @pytest.fixture
@@ -32,6 +50,17 @@ class TestCoreasonExecutor:
         signal = MagicMock(spec=Signal)
         signal.triggered = False
         return signal
+
+    @pytest.fixture
+    def valid_job_config(self) -> Dict[str, Any]:
+        return {
+            "job_id": str(uuid.uuid4()),
+            "clients": ["client1", "client2"],
+            "min_clients": 2,
+            "rounds": 10,
+            "strategy": "FED_AVG",
+            "privacy": {"mechanism": "DP_SGD", "noise_multiplier": 1.0, "max_grad_norm": 1.0, "target_epsilon": 3.0},
+        }
 
     def test_init(self, executor: CoreasonExecutor) -> None:
         """Test initialization of the executor."""
@@ -54,25 +83,46 @@ class TestCoreasonExecutor:
         executor: CoreasonExecutor,
         mock_fl_ctx: MagicMock,
         mock_signal: MagicMock,
+        valid_job_config: Dict[str, Any],
     ) -> None:
         """Test execution with the training task name."""
         shareable = Shareable()
+        shareable.set_header("job_config", json.dumps(valid_job_config))
+
+        # Mock Sentry
+        executor.sentry = MagicMock()
+        executor.sentry.validate_input.return_value = True
+        executor.sentry.sanitize_output.return_value = {"params": {}}
+
         result = executor.execute("train_task", shareable, mock_fl_ctx, mock_signal)
         assert isinstance(result, Shareable)
-        # Default implementation just returns Shareable(), implying OK if not set?
-        # nvflare default shareable is OK.
+        assert result.get_return_code() == ReturnCode.OK
 
     def test_abort_signal(
         self,
         executor: CoreasonExecutor,
         mock_fl_ctx: MagicMock,
         mock_signal: MagicMock,
+        valid_job_config: Dict[str, Any],
     ) -> None:
         """Test that execution respects the abort signal."""
         mock_signal.triggered = True
         shareable = Shareable()
+        shareable.set_header("job_config", json.dumps(valid_job_config))
+
+        # Mock Sentry
+        executor.sentry = MagicMock()
+        executor.sentry.validate_input.return_value = True
+
+        # The PrivacyGuard init will likely happen before the abort check in the current impl.
+        # But let's check.
+        # _execute_training logic: Attest -> Config -> Input Valid -> Privacy Init -> Abort Check -> Train -> Output
+        # So abort signal is checked just before training loop (mocked).
+
         result = executor.execute("train_task", shareable, mock_fl_ctx, mock_signal)
         assert isinstance(result, Shareable)
+        # Assuming abort returns empty shareable with OK (default) or ABORT?
+        # The implementation returns Shareable() which is OK.
 
     def test_execute_exception_handling(
         self,
@@ -104,10 +154,22 @@ class TestCoreasonExecutor:
         self,
         mock_fl_ctx: MagicMock,
         mock_signal: MagicMock,
+        valid_job_config: Dict[str, Any],
+        mock_attestation_provider: MagicMock,  # Need this to mock internal provider if init called here
     ) -> None:
         """Test weird configuration: same name for training and aggregation."""
+        # Note: CoreasonExecutor calls get_attestation_provider in __init__.
+        # So we need the mock active during this call.
         executor = CoreasonExecutor(training_task_name="same_name", aggregation_task_name="same_name")
+
         shareable = Shareable()
+        shareable.set_header("job_config", json.dumps(valid_job_config))
+
+        # Mock Sentry
+        executor.sentry = MagicMock()
+        executor.sentry.validate_input.return_value = True
+        executor.sentry.sanitize_output.return_value = {"params": {}}
+
         # Should behave as training since it's the first check
         result = executor.execute("same_name", shareable, mock_fl_ctx, mock_signal)
         # Since _execute_training succeeds (returns Shareable()), result RC should be OK (default)
