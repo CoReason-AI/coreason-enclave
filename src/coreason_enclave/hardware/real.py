@@ -40,18 +40,28 @@ class RealAttestationProvider(AttestationProvider):
         available_device = None
 
         for device in tee_devices:
-            if os.path.exists(device):
+            if not os.path.exists(device):
+                continue
+
+            try:
+                # Attempt to open the device to verify permissions
+                with open(device, "rb"):
+                    pass
                 available_device = device
                 break
+            except PermissionError:
+                logger.warning(f"TEE device found at {device} but permission was DENIED.")
+            except OSError as e:
+                logger.warning(f"TEE device found at {device} but could not be accessed: {e}")
 
         if not available_device:
             raise RuntimeError(
-                "No TEE hardware detected. "
+                "No accessible TEE hardware detected. "
                 "Ensure you are running on a Confidential Compute instance (SGX/SEV/TDX) "
-                "or use simulation mode."
+                "and have the correct permissions (e.g., sgx group)."
             )
 
-        logger.info(f"TEE Hardware detected at: {available_device}")
+        logger.info(f"TEE Hardware detected and accessible at: {available_device}")
 
         # TODO: Integrate with Gramine/SCONE API to get the actual quote.
         # For this implementation, since we cannot run on real hardware in this environment,
