@@ -36,7 +36,26 @@ class ValidatorProtocol(Protocol):
         Raises:
             ValueError: If validation fails with specific errors.
         """
-        ...
+        ...  # pragma: no cover
+
+
+class FileExistenceValidator:
+    """
+    A simple validator that checks for file existence.
+    Satisfies ValidatorProtocol.
+    """
+
+    def validate(self, data_path: str, schema: Any) -> bool:
+        """
+        Validate that the file exists at the given path.
+        Schema is ignored for this basic validation.
+        """
+        path = Path(data_path)
+        if not path.exists():
+            logger.error(f"Validation failed: File {data_path} does not exist.")
+            return False
+        logger.info(f"FileExistenceValidator: Validated existence of {data_path}")
+        return True
 
 
 class DataLeakageError(Exception):
