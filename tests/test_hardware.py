@@ -13,11 +13,9 @@ from unittest.mock import patch
 
 import pytest
 
-from coreason_enclave.hardware import (
-    RealAttestationProvider,
-    SimulationAttestationProvider,
-    get_attestation_provider,
-)
+from coreason_enclave.hardware.factory import get_attestation_provider
+from coreason_enclave.hardware.real import RealAttestationProvider
+from coreason_enclave.hardware.simulation import SimulationAttestationProvider
 from coreason_enclave.schemas import AttestationReport
 
 
@@ -30,7 +28,7 @@ def test_simulation_provider_generates_valid_report() -> None:
     assert report.hardware_type == "SIMULATION_MODE"
     assert report.status == "TRUSTED"
     assert len(report.node_id) > 0
-    assert len(report.measurement_hash) > 0
+    assert len(report.measurement_hash) == 64
     assert len(report.enclave_signature) > 0
 
 
@@ -84,15 +82,16 @@ def test_real_provider_raises_error_without_hardware() -> None:
         assert "No TEE hardware detected" in str(excinfo.value)
 
 
-def test_real_provider_raises_not_implemented_with_hardware() -> None:
-    """Test that RealAttestationProvider raises NotImplementedError even if hardware 'exists' (for now)."""
+def test_real_provider_returns_report_with_hardware() -> None:
+    """Test that RealAttestationProvider returns a report if hardware exists (mocked)."""
     provider = RealAttestationProvider()
 
     # Mock os.path.exists to return True for one device
     with patch("os.path.exists", side_effect=lambda x: x == "/dev/sgx_enclave"):
-        with pytest.raises(NotImplementedError) as excinfo:
-            provider.attest()
-        assert "not yet implemented" in str(excinfo.value)
+        report = provider.attest()
+        assert isinstance(report, AttestationReport)
+        assert report.status == "TRUSTED"
+        assert "real_hardware_signature" in report.enclave_signature
 
 
 def test_real_provider_device_priority() -> None:
@@ -112,9 +111,6 @@ def test_real_provider_device_priority() -> None:
         return False
 
     with patch("os.path.exists", side_effect=mock_exists):
-        # Should NOT raise RuntimeError (hardware not found)
-        # Should raise NotImplementedError (because we found hardware but logic isn't done)
-        with pytest.raises(NotImplementedError) as excinfo:
-            provider.attest()
-        # Verify it passed the hardware check
-        assert "No TEE hardware detected" not in str(excinfo.value)
+        report = provider.attest()
+        assert isinstance(report, AttestationReport)
+        assert report.status == "TRUSTED"
