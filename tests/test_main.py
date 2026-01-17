@@ -8,8 +8,32 @@
 #
 # Source Code: https://github.com/CoReason-AI/coreason_enclave
 
-from coreason_enclave.main import hello_world
+from unittest.mock import patch
+
+import pytest
+
+from coreason_enclave.main import main
 
 
-def test_hello_world() -> None:
-    assert hello_world() == "Hello World!"
+def test_main_arguments() -> None:
+    """Test that main parses arguments correctly and sets up the environment."""
+    test_args = ["-w", "/tmp/workspace", "-c", "config.json"]
+
+    # We mock ClientTrain or whatever internal NVFlare component we invoke
+    # Since the current implementation just passes, we verify it runs without error
+    # and logs the correct info.
+
+    with patch("coreason_enclave.main.logger") as mock_logger:
+        main(test_args)
+
+        # Verify logs
+        mock_logger.info.assert_any_call("Starting Coreason Enclave Agent...")
+        mock_logger.info.assert_any_call("Workspace: /tmp/workspace")
+        mock_logger.info.assert_any_call("Config: config.json")
+        mock_logger.info.assert_any_call("Invoking NVFlare ClientTrain...")
+
+
+def test_main_missing_args() -> None:
+    """Test that main raises SystemExit if required args are missing."""
+    with pytest.raises(SystemExit):
+        main([])  # Missing -w and -c

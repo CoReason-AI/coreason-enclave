@@ -60,8 +60,24 @@ class FederationJob(BaseModel):
     clients: List[str] = Field(..., description="List of participating client node IDs")
     min_clients: int = Field(..., description="Minimum number of clients required")
     rounds: int = Field(..., description="Number of training rounds")
+    dataset_id: str = Field(..., description="Identifier/path for the training dataset")
+    model_arch: str = Field(..., description="ID of the model architecture in the Registry")
     strategy: AggregationStrategy
     privacy: PrivacyConfig
+
+    @field_validator("dataset_id")
+    @classmethod
+    def validate_dataset_id(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("dataset_id cannot be empty")
+        return v
+
+    @field_validator("model_arch")
+    @classmethod
+    def validate_model_arch(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("model_arch cannot be empty")
+        return v
 
     @field_validator("rounds")
     @classmethod

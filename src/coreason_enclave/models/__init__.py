@@ -8,14 +8,7 @@
 #
 # Source Code: https://github.com/CoReason-AI/coreason_enclave
 
-"""
-coreason-enclave
-"""
+from coreason_enclave.models.registry import ModelRegistry
+from coreason_enclave.models.simple_mlp import SimpleMLP
 
-__version__ = "0.1.0"
-__author__ = "Gowtham A Rao"
-__email__ = "gowtham.rao@coreason.ai"
-
-from .main import main
-
-__all__ = ["main"]
+__all__ = ["ModelRegistry", "SimpleMLP"]

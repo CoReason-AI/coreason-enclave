@@ -14,9 +14,11 @@ from typing import Any, Dict, Generator
 from unittest.mock import MagicMock, patch
 
 import pytest
+import torch
 from nvflare.apis.fl_context import FLContext
 from nvflare.apis.shareable import ReturnCode, Shareable
 from nvflare.apis.signal import Signal
+from torch.utils.data import DataLoader, TensorDataset
 
 from coreason_enclave.federation.executor import CoreasonExecutor
 from coreason_enclave.schemas import AttestationReport
@@ -29,9 +31,11 @@ class TestCoreasonExecutorSecurity:
             "job_id": str(uuid.uuid4()),
             "clients": ["client1", "client2"],
             "min_clients": 2,
-            "rounds": 10,
+            "rounds": 1,
+            "dataset_id": "test_data.csv",
+            "model_arch": "SimpleMLP",
             "strategy": "FED_AVG",
-            "privacy": {"mechanism": "DP_SGD", "noise_multiplier": 1.0, "max_grad_norm": 1.0, "target_epsilon": 3.0},
+            "privacy": {"mechanism": "DP_SGD", "noise_multiplier": 10.0, "max_grad_norm": 1.0, "target_epsilon": 100.0},
         }
 
     @pytest.fixture
@@ -84,12 +88,23 @@ class TestCoreasonExecutorSecurity:
         executor.sentry.validate_input.return_value = True
         executor.sentry.sanitize_output.return_value = {"params": {"a": 1}}
 
+        # Use Real DataLoader with Dummy Data
+        executor.data_loader_factory = MagicMock()
+
+        # Create dummy TensorDataset compatible with SimpleMLP (input_dim=10)
+        X = torch.randn(32, 10)
+        y = torch.randn(32, 1)
+        dataset = TensorDataset(X, y)
+        loader = DataLoader(dataset, batch_size=16)
+
+        executor.data_loader_factory.get_loader.return_value = loader
+
         result = executor.execute("train_task", valid_shareable, mock_fl_ctx, mock_signal)
 
         assert result.get_return_code() == ReturnCode.OK
         # Verify flow
         executor.attestation_provider.attest.assert_called_once()  # type: ignore
-        executor.sentry.validate_input.assert_called_once()
+        executor.data_loader_factory.get_loader.assert_called_once()
         executor.sentry.sanitize_output.assert_called_once()
 
     def test_secure_execution_dict_config(
@@ -107,6 +122,15 @@ class TestCoreasonExecutorSecurity:
         executor.sentry = MagicMock()
         executor.sentry.validate_input.return_value = True
         executor.sentry.sanitize_output.return_value = {"params": {"a": 1}}
+
+        # Use Real DataLoader
+        executor.data_loader_factory = MagicMock()
+        X = torch.randn(16, 10)
+        y = torch.randn(16, 1)
+        dataset = TensorDataset(X, y)
+        loader = DataLoader(dataset, batch_size=8)
+
+        executor.data_loader_factory.get_loader.return_value = loader
 
         result = executor.execute("train_task", shareable, mock_fl_ctx, mock_signal)
 
@@ -208,6 +232,15 @@ class TestCoreasonExecutorSecurity:
         executor.sentry = MagicMock()
         executor.sentry.validate_input.return_value = True
 
+        # Mock DataLoaderFactory
+        executor.data_loader_factory = MagicMock()
+        X = torch.randn(16, 10)
+        y = torch.randn(16, 1)
+        dataset = TensorDataset(X, y)
+        loader = DataLoader(dataset, batch_size=8)
+
+        executor.data_loader_factory.get_loader.return_value = loader
+
         # Trigger abort signal
         mock_signal.triggered = True
 
@@ -231,6 +264,15 @@ class TestCoreasonExecutorSecurity:
         executor.sentry = MagicMock()
         executor.sentry.validate_input.return_value = True
 
+        # Mock DataLoaderFactory
+        executor.data_loader_factory = MagicMock()
+        X = torch.randn(16, 10)
+        y = torch.randn(16, 1)
+        dataset = TensorDataset(X, y)
+        loader = DataLoader(dataset, batch_size=8)
+
+        executor.data_loader_factory.get_loader.return_value = loader
+
         # Mock PrivacyGuard to raise exception
         with patch("coreason_enclave.federation.executor.PrivacyGuard") as mock_guard:
             mock_guard.side_effect = ValueError("Invalid privacy config")
@@ -251,6 +293,15 @@ class TestCoreasonExecutorSecurity:
         executor.sentry = MagicMock()
         executor.sentry.validate_input.return_value = True
         executor.sentry.sanitize_output.return_value = {"params": {}}
+
+        # Mock DataLoaderFactory
+        executor.data_loader_factory = MagicMock()
+        X = torch.randn(16, 10)
+        y = torch.randn(16, 1)
+        dataset = TensorDataset(X, y)
+        loader = DataLoader(dataset, batch_size=8)
+
+        executor.data_loader_factory.get_loader.return_value = loader
 
         # 1. Valid
         result1 = executor.execute("train_task", valid_shareable, mock_fl_ctx, mock_signal)

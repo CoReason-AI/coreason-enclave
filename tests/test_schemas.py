@@ -67,11 +67,43 @@ def test_federation_job_valid() -> None:
         clients=["node_a", "node_b"],
         min_clients=2,
         rounds=50,
+        dataset_id="data.csv",
+        model_arch="SimpleMLP",
         strategy=AggregationStrategy.FED_AVG,
         privacy=PrivacyConfig(noise_multiplier=0.5, max_grad_norm=1.0, target_epsilon=5.0),
     )
     assert len(job.clients) == 2
     assert job.rounds == 50
+    assert job.dataset_id == "data.csv"
+    assert job.model_arch == "SimpleMLP"
+
+
+def test_federation_job_empty_dataset_id() -> None:
+    with pytest.raises(ValidationError, match="dataset_id cannot be empty"):
+        FederationJob(
+            job_id=uuid4(),
+            clients=["node_a"],
+            min_clients=1,
+            rounds=10,
+            dataset_id="  ",
+            model_arch="SimpleMLP",
+            strategy=AggregationStrategy.FED_AVG,
+            privacy=PrivacyConfig(noise_multiplier=1.0, max_grad_norm=1.0, target_epsilon=1.0),
+        )
+
+
+def test_federation_job_empty_model_arch() -> None:
+    with pytest.raises(ValidationError, match="model_arch cannot be empty"):
+        FederationJob(
+            job_id=uuid4(),
+            clients=["node_a"],
+            min_clients=1,
+            rounds=10,
+            dataset_id="data.csv",
+            model_arch="",
+            strategy=AggregationStrategy.FED_AVG,
+            privacy=PrivacyConfig(noise_multiplier=1.0, max_grad_norm=1.0, target_epsilon=1.0),
+        )
 
 
 def test_federation_job_boundaries() -> None:
@@ -82,6 +114,8 @@ def test_federation_job_boundaries() -> None:
         clients=["node_a"],
         min_clients=1,
         rounds=1,
+        dataset_id="data.csv",
+        model_arch="SimpleMLP",
         strategy=AggregationStrategy.FED_AVG,
         privacy=PrivacyConfig(noise_multiplier=1.0, max_grad_norm=1.0, target_epsilon=1.0),
     )
@@ -93,6 +127,8 @@ def test_federation_job_boundaries() -> None:
         clients=["node_a"],
         min_clients=1,
         rounds=10000,
+        dataset_id="data.csv",
+        model_arch="SimpleMLP",
         strategy=AggregationStrategy.FED_AVG,
         privacy=PrivacyConfig(noise_multiplier=1.0, max_grad_norm=1.0, target_epsilon=1.0),
     )
@@ -104,6 +140,8 @@ def test_federation_job_boundaries() -> None:
         clients=["node_a", "node_b"],
         min_clients=2,
         rounds=10,
+        dataset_id="data.csv",
+        model_arch="SimpleMLP",
         strategy=AggregationStrategy.FED_AVG,
         privacy=PrivacyConfig(noise_multiplier=1.0, max_grad_norm=1.0, target_epsilon=1.0),
     )
@@ -118,6 +156,8 @@ def test_federation_job_rounds_bounds() -> None:
             clients=["node_a"],
             min_clients=1,
             rounds=0,
+            dataset_id="data.csv",
+            model_arch="SimpleMLP",
             strategy=AggregationStrategy.FED_AVG,
             privacy=PrivacyConfig(noise_multiplier=1.0, max_grad_norm=1.0, target_epsilon=1.0),
         )
@@ -129,6 +169,8 @@ def test_federation_job_rounds_bounds() -> None:
             clients=["node_a"],
             min_clients=1,
             rounds=10001,
+            dataset_id="data.csv",
+            model_arch="SimpleMLP",
             strategy=AggregationStrategy.FED_AVG,
             privacy=PrivacyConfig(noise_multiplier=1.0, max_grad_norm=1.0, target_epsilon=1.0),
         )
@@ -141,6 +183,8 @@ def test_federation_job_unique_clients() -> None:
             clients=["node_a", "node_a"],  # Duplicate
             min_clients=1,
             rounds=10,
+            dataset_id="data.csv",
+            model_arch="SimpleMLP",
             strategy=AggregationStrategy.FED_AVG,
             privacy=PrivacyConfig(noise_multiplier=1.0, max_grad_norm=1.0, target_epsilon=1.0),
         )
@@ -154,6 +198,8 @@ def test_federation_job_client_uniqueness_case_sensitivity() -> None:
         clients=["node_a", "NODE_A"],
         min_clients=2,
         rounds=10,
+        dataset_id="data.csv",
+        model_arch="SimpleMLP",
         strategy=AggregationStrategy.FED_AVG,
         privacy=PrivacyConfig(noise_multiplier=1.0, max_grad_norm=1.0, target_epsilon=1.0),
     )
@@ -168,6 +214,8 @@ def test_federation_job_min_clients_logic() -> None:
             clients=["node_a"],
             min_clients=2,
             rounds=10,
+            dataset_id="data.csv",
+            model_arch="SimpleMLP",
             strategy=AggregationStrategy.FED_AVG,
             privacy=PrivacyConfig(noise_multiplier=1.0, max_grad_norm=1.0, target_epsilon=1.0),
         )
@@ -179,6 +227,8 @@ def test_federation_job_min_clients_logic() -> None:
             clients=["node_a"],
             min_clients=0,
             rounds=10,
+            dataset_id="data.csv",
+            model_arch="SimpleMLP",
             strategy=AggregationStrategy.FED_AVG,
             privacy=PrivacyConfig(noise_multiplier=1.0, max_grad_norm=1.0, target_epsilon=1.0),
         )
