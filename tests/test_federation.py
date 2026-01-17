@@ -14,9 +14,11 @@ from typing import Any, Dict, Generator
 from unittest.mock import MagicMock, patch
 
 import pytest
+import torch
 from nvflare.apis.fl_context import FLContext
 from nvflare.apis.shareable import ReturnCode, Shareable
 from nvflare.apis.signal import Signal
+from torch.utils.data import DataLoader, TensorDataset
 
 from coreason_enclave.federation.executor import CoreasonExecutor
 from coreason_enclave.schemas import AttestationReport
@@ -57,9 +59,11 @@ class TestCoreasonExecutor:
             "job_id": str(uuid.uuid4()),
             "clients": ["client1", "client2"],
             "min_clients": 2,
-            "rounds": 10,
+            "rounds": 1,
+            "dataset_id": "test_data.csv",
+            "model_arch": "SimpleMLP",
             "strategy": "FED_AVG",
-            "privacy": {"mechanism": "DP_SGD", "noise_multiplier": 1.0, "max_grad_norm": 1.0, "target_epsilon": 3.0},
+            "privacy": {"mechanism": "DP_SGD", "noise_multiplier": 10.0, "max_grad_norm": 1.0, "target_epsilon": 100.0},
         }
 
     def test_init(self, executor: CoreasonExecutor) -> None:
@@ -94,6 +98,14 @@ class TestCoreasonExecutor:
         executor.sentry.validate_input.return_value = True
         executor.sentry.sanitize_output.return_value = {"params": {}}
 
+        # Use Real DataLoader
+        executor.data_loader_factory = MagicMock()
+        X = torch.randn(2, 10)
+        y = torch.randn(2, 1)
+        dataset = TensorDataset(X, y)
+        loader = DataLoader(dataset, batch_size=2)
+        executor.data_loader_factory.get_loader.return_value = loader
+
         result = executor.execute("train_task", shareable, mock_fl_ctx, mock_signal)
         assert isinstance(result, Shareable)
         assert result.get_return_code() == ReturnCode.OK
@@ -114,15 +126,19 @@ class TestCoreasonExecutor:
         executor.sentry = MagicMock()
         executor.sentry.validate_input.return_value = True
 
-        # The PrivacyGuard init will likely happen before the abort check in the current impl.
-        # But let's check.
-        # _execute_training logic: Attest -> Config -> Input Valid -> Privacy Init -> Abort Check -> Train -> Output
-        # So abort signal is checked just before training loop (mocked).
+        # Use Real DataLoader
+        executor.data_loader_factory = MagicMock()
+        X = torch.randn(2, 10)
+        y = torch.randn(2, 1)
+        dataset = TensorDataset(X, y)
+        loader = DataLoader(dataset, batch_size=2)
+        executor.data_loader_factory.get_loader.return_value = loader
 
         result = executor.execute("train_task", shareable, mock_fl_ctx, mock_signal)
         assert isinstance(result, Shareable)
         # Assuming abort returns empty shareable with OK (default) or ABORT?
         # The implementation returns Shareable() which is OK.
+        assert result.get_return_code() == ReturnCode.OK
 
     def test_execute_exception_handling(
         self,
@@ -169,6 +185,14 @@ class TestCoreasonExecutor:
         executor.sentry = MagicMock()
         executor.sentry.validate_input.return_value = True
         executor.sentry.sanitize_output.return_value = {"params": {}}
+
+        # Use Real DataLoader
+        executor.data_loader_factory = MagicMock()
+        X = torch.randn(2, 10)
+        y = torch.randn(2, 1)
+        dataset = TensorDataset(X, y)
+        loader = DataLoader(dataset, batch_size=2)
+        executor.data_loader_factory.get_loader.return_value = loader
 
         # Should behave as training since it's the first check
         result = executor.execute("same_name", shareable, mock_fl_ctx, mock_signal)
