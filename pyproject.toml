@@ -14,6 +14,7 @@ pydantic = "^2.12.5"
 torch = "^2.9.1"
 opacus = "^1.5.4"
 nvflare = "^2.7.1"
+pandas = "^2.3.3"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.2.2"
