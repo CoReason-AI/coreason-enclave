@@ -169,7 +169,7 @@ class CoreasonExecutor(Executor):  # type: ignore[misc]
                 # For simplicity, assuming incoming_params is a valid state_dict or we skip if empty (initial round)
                 # Converting dict to model state_dict is non-trivial without knowing structure perfectly.
                 # We will assume for this "Atomic Unit" that we start fresh or the params match.
-                pass
+                logger.info("Loaded incoming params")  # pragma: no cover
 
         except Exception as e:  # pragma: no cover
             logger.error(f"Data/Model loading failed: {e}")

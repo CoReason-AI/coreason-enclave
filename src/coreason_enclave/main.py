@@ -104,5 +104,5 @@ def main(args: Optional[list[str]] = None) -> None:
             sys.argv = sys_argv_backup
 
 
-if __name__ == "__main__":
-    main()
+if __name__ == "__main__":  # pragma: no cover
+    main()  # pragma: no cover

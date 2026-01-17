@@ -171,6 +171,38 @@ class TestCoreasonExecutorSecurity:
         result = executor.execute("train_task", shareable, mock_fl_ctx, mock_signal)
         assert result.get_return_code() == ReturnCode.BAD_TASK_DATA
 
+    def test_privacy_budget_exceeded_in_training(
+        self,
+        executor: CoreasonExecutor,
+        valid_shareable: Shareable,
+        mock_fl_ctx: MagicMock,
+        mock_signal: MagicMock,
+        mock_job_config: Dict[str, Any],
+    ) -> None:
+        """Test that execution fails if privacy budget is exceeded."""
+        # Set parameters to guarantee budget fail: very small epsilon, many steps
+        mock_job_config["privacy"]["target_epsilon"] = 0.0001
+        mock_job_config["rounds"] = 100
+
+        shareable = Shareable()
+        shareable.set_header("job_config", json.dumps(mock_job_config))
+
+        executor.sentry = MagicMock()
+        executor.sentry.validate_input.return_value = True
+        executor.sentry.sanitize_output.return_value = {"params": {}}
+
+        # Real loader with data
+        executor.data_loader_factory = MagicMock()
+        X = torch.randn(32, 10)
+        y = torch.randn(32, 1)
+        dataset = TensorDataset(X, y)
+        loader = DataLoader(dataset, batch_size=4)
+        executor.data_loader_factory.get_loader.return_value = loader
+
+        result = executor.execute("train_task", shareable, mock_fl_ctx, mock_signal)
+
+        assert result.get_return_code() == ReturnCode.EXECUTION_EXCEPTION
+
     def test_secure_execution_invalid_config(
         self,
         executor: CoreasonExecutor,

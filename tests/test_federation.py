@@ -136,6 +136,8 @@ class TestCoreasonExecutor:
 
         result = executor.execute("train_task", shareable, mock_fl_ctx, mock_signal)
         assert isinstance(result, Shareable)
+        # Assuming abort returns empty shareable with OK (default) or ABORT?
+        # The implementation returns Shareable() which is OK.
         assert result.get_return_code() == ReturnCode.OK
 
     def test_execute_exception_handling(
