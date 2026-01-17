@@ -11,6 +11,8 @@
 import os
 from unittest.mock import patch
 
+import pytest
+
 from coreason_enclave.hardware.factory import get_attestation_provider
 from coreason_enclave.hardware.real import RealAttestationProvider
 from coreason_enclave.hardware.simulation import SimulationAttestationProvider
@@ -53,15 +55,13 @@ def test_cli_integration_secure_mode() -> None:
         assert isinstance(provider, RealAttestationProvider)
 
 
-def test_cli_integration_env_precedence() -> None:
+def test_cli_integration_env_violation_abort() -> None:
     """
-    Verify that if env is set to TRUE externally, factory respects it
-    even without the flag, consistent with main's logging.
+    Verify that if env is set to TRUE externally BUT flag is missing,
+    the app aborts and does NOT initialize the provider (or crashes main).
     """
     test_args = ["-w", "/tmp/ws", "-c", "conf.json"]
 
     with patch.dict(os.environ, {"COREASON_ENCLAVE_SIMULATION": "true"}, clear=True):
-        main(test_args)
-
-        provider = get_attestation_provider()
-        assert isinstance(provider, SimulationAttestationProvider)
+        with pytest.raises(SystemExit):
+            main(test_args)

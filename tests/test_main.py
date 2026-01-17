@@ -53,20 +53,19 @@ def test_main_insecure_mode() -> None:
 
 
 @patch.dict(os.environ, {"COREASON_ENCLAVE_SIMULATION": "true"}, clear=True)
-def test_main_respects_existing_env_var() -> None:
-    """Test that existing env var is respected even without flag (with warning)."""
+def test_main_aborts_on_env_mismatch() -> None:
+    """Test that existing true env var WITHOUT flag causes abort."""
     test_args = ["-w", "/tmp/ws", "-c", "conf.json"]
 
     with patch("coreason_enclave.main.logger") as mock_logger:
-        main(test_args)
+        with pytest.raises(SystemExit):
+            main(test_args)
 
-        # Should remain true
-        assert os.environ.get("COREASON_ENCLAVE_SIMULATION") == "true"
-        # Should log a warning about env precedence
-        mock_logger.warning.assert_any_call(
-            "COREASON_ENCLAVE_SIMULATION is set to 'true' via environment, "
-            "but --insecure flag was not passed. "
-            "Proceeding in simulation mode (Environment Precedence)."
+        # Should log a critical error
+        mock_logger.critical.assert_called_with(
+            "Security Violation: COREASON_ENCLAVE_SIMULATION=true is set in the environment, "
+            "but the required '--insecure' CLI flag is missing. "
+            "Refusing to launch in insecure mode without explicit CLI override."
         )
 
 
