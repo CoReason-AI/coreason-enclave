@@ -82,3 +82,27 @@ def test_main_secure_default() -> None:
         val = os.environ.get("COREASON_ENCLAVE_SIMULATION", "false")
         assert val != "true"
         mock_logger.info.assert_any_call("Running in SECURE HARDWARE MODE. TEE Attestation required.")
+
+
+@patch.dict(os.environ, {"COREASON_ENCLAVE_SIMULATION": "false"}, clear=True)
+def test_insecure_flag_overrides_env_false() -> None:
+    """Test that --insecure flag overrides an explicit false env var."""
+    test_args = ["-w", "/tmp/ws", "-c", "conf.json", "--insecure"]
+
+    with patch("coreason_enclave.main.logger") as mock_logger:
+        main(test_args)
+
+        assert os.environ.get("COREASON_ENCLAVE_SIMULATION") == "true"
+        mock_logger.warning.assert_any_call("!!! RUNNING IN INSECURE SIMULATION MODE !!!")
+
+
+@patch.dict(os.environ, {"COREASON_ENCLAVE_SIMULATION": "garbage_value"}, clear=True)
+def test_insecure_flag_overrides_garbage_env() -> None:
+    """Test that --insecure flag overrides a garbage env var."""
+    test_args = ["-w", "/tmp/ws", "-c", "conf.json", "--insecure"]
+
+    with patch("coreason_enclave.main.logger") as mock_logger:
+        main(test_args)
+
+        assert os.environ.get("COREASON_ENCLAVE_SIMULATION") == "true"
+        mock_logger.warning.assert_any_call("!!! RUNNING IN INSECURE SIMULATION MODE !!!")
