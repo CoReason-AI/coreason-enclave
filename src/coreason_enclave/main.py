@@ -9,6 +9,7 @@
 # Source Code: https://github.com/CoReason-AI/coreason_enclave
 
 import argparse
+import os
 import sys
 from typing import Optional
 
@@ -25,6 +26,40 @@ if sys.platform == "win32":  # pragma: no cover
 from coreason_enclave.utils.logger import logger
 
 
+def configure_security_mode(insecure_flag: bool) -> None:
+    """
+    Configure the security mode for the Enclave Agent.
+    Strictly enforces the presence of the --insecure flag for simulation mode.
+
+    Args:
+        insecure_flag: True if --insecure was passed in CLI.
+
+    Raises:
+        RuntimeError: If simulation mode is requested via environment but flag is missing.
+    """
+    env_simulation = os.environ.get("COREASON_ENCLAVE_SIMULATION", "false").lower() == "true"
+
+    if insecure_flag:
+        logger.warning("!!! RUNNING IN INSECURE SIMULATION MODE !!!")
+        logger.warning("Hardware attestation checks are BYPASSED via --insecure flag.")
+        logger.warning("Do NOT use this mode for production data.")
+        os.environ["COREASON_ENCLAVE_SIMULATION"] = "true"
+    else:
+        # Strict Enforcement: If environment requests simulation but flag is missing, ABORT.
+        if env_simulation:
+            error_msg = (
+                "Security Violation: COREASON_ENCLAVE_SIMULATION=true is set in the environment, "
+                "but the required '--insecure' CLI flag is missing. "
+                "Refusing to launch in insecure mode without explicit CLI override."
+            )
+            logger.critical(error_msg)
+            raise RuntimeError(error_msg)
+
+        # Force secure mode to prevent accidental insecurity from lower layers
+        os.environ["COREASON_ENCLAVE_SIMULATION"] = "false"
+        logger.info("Running in SECURE HARDWARE MODE. TEE Attestation required.")
+
+
 def main(args: Optional[list[str]] = None) -> None:
     """
     Entry point for the Coreason Enclave Agent.
@@ -36,11 +71,19 @@ def main(args: Optional[list[str]] = None) -> None:
     parser.add_argument("--workspace", "-w", type=str, required=True, help="Path to workspace directory")
     parser.add_argument("--conf", "-c", type=str, required=True, help="Path to client config file")
     parser.add_argument("--config_folder", "-f", type=str, default="config", help="Config folder path")
+    parser.add_argument(
+        "--insecure",
+        action="store_true",
+        help="Run in simulation mode (bypasses hardware attestation)",
+    )
     # Allows passing arbitrary args to NVFlare
     parser.add_argument("opts", nargs=argparse.REMAINDER, help="Additional options")
 
     try:
         parsed_args = parser.parse_args(args)
+
+        # Validate and Configure Security
+        configure_security_mode(parsed_args.insecure)
 
         # Parse additional options
         # NVFlare expects args object to have attributes for these options
@@ -96,6 +139,8 @@ def main(args: Optional[list[str]] = None) -> None:
         pass
 
     except Exception as e:
+        # If it's the security check failing, logger already handled it, just ensure we exit 1
+        # If it's argparse error (e.g. required args), it calls sys.exit(2)
         logger.exception(f"Failed to start Enclave Agent: {e}")
         sys.exit(1)
     finally:
