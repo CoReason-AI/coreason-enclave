@@ -64,7 +64,7 @@ def test_main_aborts_on_env_mismatch() -> None:
         # Should log a critical error
         mock_logger.critical.assert_called_with(
             "Security Violation: COREASON_ENCLAVE_SIMULATION=true is set in the environment, "
-            "but the required '--insecure' CLI flag is missing. "
+            "but the required '--insecure' or '--simulation' CLI flag is missing. "
             "Refusing to launch in insecure mode without explicit CLI override."
         )
 

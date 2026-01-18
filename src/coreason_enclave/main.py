@@ -26,22 +26,24 @@ if sys.platform == "win32":  # pragma: no cover
 from coreason_enclave.utils.logger import logger
 
 
-def configure_security_mode(insecure_flag: bool) -> None:
+def configure_security_mode(simulation_flag: bool, insecure_flag: bool) -> None:
     """
     Configure the security mode for the Enclave Agent.
-    Strictly enforces the presence of the --insecure flag for simulation mode.
+    Strictly enforces the presence of the --insecure or --simulation flag for simulation mode.
 
     Args:
+        simulation_flag: True if --simulation was passed in CLI.
         insecure_flag: True if --insecure was passed in CLI.
 
     Raises:
         RuntimeError: If simulation mode is requested via environment but flag is missing.
     """
     env_simulation = os.environ.get("COREASON_ENCLAVE_SIMULATION", "false").lower() == "true"
+    requested_simulation = simulation_flag or insecure_flag
 
-    if insecure_flag:
+    if requested_simulation:
         logger.warning("!!! RUNNING IN INSECURE SIMULATION MODE !!!")
-        logger.warning("Hardware attestation checks are BYPASSED via --insecure flag.")
+        logger.warning("Hardware attestation checks are BYPASSED via --simulation/--insecure flag.")
         logger.warning("Do NOT use this mode for production data.")
         os.environ["COREASON_ENCLAVE_SIMULATION"] = "true"
     else:
@@ -49,7 +51,7 @@ def configure_security_mode(insecure_flag: bool) -> None:
         if env_simulation:
             error_msg = (
                 "Security Violation: COREASON_ENCLAVE_SIMULATION=true is set in the environment, "
-                "but the required '--insecure' CLI flag is missing. "
+                "but the required '--insecure' or '--simulation' CLI flag is missing. "
                 "Refusing to launch in insecure mode without explicit CLI override."
             )
             logger.critical(error_msg)
@@ -72,9 +74,14 @@ def main(args: Optional[list[str]] = None) -> None:
     parser.add_argument("--conf", "-c", type=str, required=True, help="Path to client config file")
     parser.add_argument("--config_folder", "-f", type=str, default="config", help="Config folder path")
     parser.add_argument(
-        "--insecure",
+        "--simulation",
         action="store_true",
         help="Run in simulation mode (bypasses hardware attestation)",
+    )
+    parser.add_argument(
+        "--insecure",
+        action="store_true",
+        help="Alias for --simulation",
     )
     # Allows passing arbitrary args to NVFlare
     parser.add_argument("opts", nargs=argparse.REMAINDER, help="Additional options")
@@ -83,7 +90,7 @@ def main(args: Optional[list[str]] = None) -> None:
         parsed_args = parser.parse_args(args)
 
         # Validate and Configure Security
-        configure_security_mode(parsed_args.insecure)
+        configure_security_mode(simulation_flag=parsed_args.simulation, insecure_flag=parsed_args.insecure)
 
         # Parse additional options
         # NVFlare expects args object to have attributes for these options
