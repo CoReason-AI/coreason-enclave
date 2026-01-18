@@ -8,37 +8,54 @@
 #
 # Source Code: https://github.com/CoReason-AI/coreason_enclave
 
+import importlib
+import shutil
+import sys
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
-import coreason_enclave.utils.logger
+# We need to import the actual module object, not the logger object inside it.
+# coreason_enclave.utils.logger is the module.
+from coreason_enclave.utils.logger import logger
 
 
 def test_logger_initialization() -> None:
     """Test that the logger is initialized correctly and creates the log directory."""
+    # Since the logger is initialized on import, we check side effects
+
+    # Check if logs directory creation is handled
+    # Note: running this test might actually create the directory in the test environment
+    # if it doesn't exist.
+
     log_path = Path("logs")
-    # Ensure it exists (it should have been created by import)
     assert log_path.exists()
     assert log_path.is_dir()
 
 
 def test_logger_exports() -> None:
     """Test that logger is exported."""
-    from coreason_enclave.utils.logger import logger
-
     assert logger is not None
 
 
-def test_logger_creates_directory_if_missing() -> None:
-    """Test that logger creation logic attempts to create directory if missing."""
-    with patch("coreason_enclave.utils.logger.Path") as mock_path_cls:
-        mock_path_instance = MagicMock()
-        mock_path_cls.return_value = mock_path_instance
-        # Simulate directory does not exist
-        mock_path_instance.exists.return_value = False
+def test_logger_directory_creation() -> None:
+    """Test that the logger module creates the logs directory if it doesn't exist."""
+    # Remove all handlers to release file locks on Windows
+    logger.remove()
 
-        # Call the configuration function directly
-        coreason_enclave.utils.logger._configure_logger()
+    # Remove the logs directory if it exists
+    log_path = Path("logs")
+    if log_path.exists():
+        shutil.rmtree(log_path)
 
-        # Verify mkdir was called
-        mock_path_instance.mkdir.assert_called_with(parents=True, exist_ok=True)
+    assert not log_path.exists()
+
+    # We must explicitly reload the module found in sys.modules
+    # 'logger_module' imported above might just be the object if the import machinery
+    # confused it with the variable 'logger' (unlikely but possible if __init__ exports it).
+    # Let's ensure we get the module from sys.modules
+
+    module = sys.modules["coreason_enclave.utils.logger"]
+    importlib.reload(module)
+
+    # Verify directory was recreated
+    assert log_path.exists()
+    assert log_path.is_dir()

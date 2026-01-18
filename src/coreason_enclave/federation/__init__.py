@@ -8,6 +8,6 @@
 #
 # Source Code: https://github.com/CoReason-AI/coreason_enclave
 
-from coreason_enclave.utils.logger import logger
+from coreason_enclave.federation.executor import CoreasonExecutor
 
-__all__ = ["logger"]
+__all__ = ["CoreasonExecutor"]

@@ -8,6 +8,7 @@
 #
 # Source Code: https://github.com/CoReason-AI/coreason_enclave
 
-from coreason_enclave.utils.logger import logger
+from coreason_enclave.models.registry import ModelRegistry
+from coreason_enclave.models.simple_mlp import SimpleMLP
 
-__all__ = ["logger"]
+__all__ = ["ModelRegistry", "SimpleMLP"]

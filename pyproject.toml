@@ -11,6 +11,10 @@ packages = [{include = "coreason_enclave", from = "src"}]
 python = ">=3.12, <3.15"
 loguru = "^0.7.2"
 pydantic = "^2.12.5"
+torch = "^2.9.1"
+opacus = "^1.5.4"
+nvflare = "^2.7.1"
+pandas = "^2.3.3"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.2.2"
@@ -19,6 +23,7 @@ pre-commit = "^3.7.1"
 pytest-cov = "^5.0.0"
 mkdocs = "^1.6.0"
 mkdocs-material = "^9.5.26"
+mypy = "^1.19.1"
 
 [build-system]
 requires = ["poetry-core"]
@@ -57,6 +62,7 @@ ignore = []
 python_version = "3.12"
 strict = true
 ignore_missing_imports = true
+plugins = ["pydantic.mypy"]
 
 [tool.pytest.ini_options]
 addopts = "--cov=src --cov-report=term-missing --cov-fail-under=100"
