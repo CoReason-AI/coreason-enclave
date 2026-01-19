@@ -1,0 +1,186 @@
+# Copyright (c) 2025 CoReason, Inc.
+#
+# This software is proprietary and dual-licensed.
+# Licensed under the Prosperity Public License 3.0 (the "License").
+# A copy of the license is available at https://prosperitylicense.com/versions/3.0.0
+# For details, see the LICENSE file.
+# Commercial use beyond a 30-day trial requires a separate license.
+#
+# Source Code: https://github.com/CoReason-AI/coreason_enclave
+
+import pytest
+import torch
+import json
+from unittest.mock import MagicMock
+from nvflare.apis.shareable import Shareable
+from nvflare.apis.fl_context import FLContext
+from nvflare.apis.signal import Signal
+
+from coreason_enclave.federation.executor import CoreasonExecutor
+from coreason_enclave.schemas import FederationJob, AggregationStrategy, PrivacyConfig
+from coreason_enclave.models.registry import ModelRegistry
+from coreason_enclave.models.simple_mlp import SimpleMLP
+
+class TestFedProx:
+
+    @pytest.fixture
+    def basic_job_config(self):
+        return {
+            "job_id": "123e4567-e89b-12d3-a456-426614174000",
+            "clients": ["client1", "client2"],
+            "min_clients": 2,
+            "rounds": 5,
+            "dataset_id": "test_data.csv",
+            "model_arch": "SimpleMLP",
+            "strategy": "FED_AVG",  # Default to FED_AVG
+            "privacy": {
+                "noise_multiplier": 1.0,
+                "max_grad_norm": 1.0,
+                "target_epsilon": 10.0
+            }
+        }
+
+    @pytest.fixture
+    def mock_data_loader(self):
+        # Use real DataLoader as Opacus inspects it deeply
+        # Increase dataset size to avoid exploding epsilon (small dataset = high sampling rate)
+        n_samples = 1000
+        data = torch.randn(n_samples, 10)
+        target = torch.randn(n_samples, 1)
+        dataset = torch.utils.data.TensorDataset(data, target)
+        # shuffle=False ensures deterministic batches for comparison
+        return torch.utils.data.DataLoader(dataset, batch_size=32, shuffle=False)
+
+    @pytest.fixture
+    def executor(self, mock_data_loader):
+        executor = CoreasonExecutor()
+        executor.attestation_provider = MagicMock()
+        executor.attestation_provider.attest.return_value.status = "TRUSTED"
+        executor.attestation_provider.attest.return_value.hardware_type = "SIMULATION"
+
+        executor.data_loader_factory = MagicMock()
+        executor.data_loader_factory.get_loader.return_value = mock_data_loader
+
+        # Mock Sentry
+        executor.sentry = MagicMock()
+        executor.sentry.sanitize_output.side_effect = lambda x: x
+
+        return executor
+
+    def test_fed_prox_vs_fed_avg(self, executor, basic_job_config, mock_data_loader):
+        """
+        Test that FED_PROX produces a higher loss than FED_AVG given the same inputs
+        and weights, because of the added proximal term.
+        To observe this, we need the weights to move away from the global weights.
+        """
+
+        # 1. Setup Common Inputs
+        initial_params = SimpleMLP().state_dict()
+        shareable_params = {k: v.clone() for k, v in initial_params.items()}
+
+        # --- RUN 1: FED_AVG ---
+        # Reset seed for Run 1
+        torch.manual_seed(42)
+        job_avg = basic_job_config.copy()
+        job_avg["strategy"] = "FED_AVG"
+
+        shareable_avg = Shareable()
+        shareable_avg.set_header("job_config", json.dumps(job_avg))
+        shareable_avg["params"] = shareable_params
+
+        # Execute FedAvg
+        result_avg = executor.execute(
+            task_name="train",
+            shareable=shareable_avg,
+            fl_ctx=FLContext(),
+            abort_signal=Signal()
+        )
+
+        loss_avg = result_avg.get("metrics")["loss"]
+
+        # Verify weights moved in Avg run
+        res_params_avg = result_avg["params"]
+        # res_params_avg is dict of lists
+        # keys might have _module prefix due to Opacus
+        changed = False
+
+        for k_init, v_init in initial_params.items():
+            # Find corresponding key in result
+            k_res = k_init
+            if k_res not in res_params_avg and f"_module.{k_init}" in res_params_avg:
+                k_res = f"_module.{k_init}"
+
+            if k_res in res_params_avg:
+                t_final = torch.tensor(res_params_avg[k_res])
+                if not torch.allclose(v_init, t_final, atol=1e-6):
+                    changed = True
+                    break
+
+        if not changed:
+            pytest.fail("FED_AVG did not update weights! Optimizer or PrivacyGuard issue.")
+
+        # --- RUN 2: FED_PROX ---
+        # Reset seed for Run 2 to ensure identical data order and privacy noise
+        torch.manual_seed(42)
+
+        job_prox = basic_job_config.copy()
+        job_prox["strategy"] = "FED_PROX"
+        job_prox["proximal_mu"] = 1.0
+
+        shareable_prox = Shareable()
+        shareable_prox.set_header("job_config", json.dumps(job_prox))
+        shareable_prox["params"] = shareable_params
+
+        result_prox = executor.execute(
+            task_name="train",
+            shareable=shareable_prox,
+            fl_ctx=FLContext(),
+            abort_signal=Signal()
+        )
+
+        loss_prox = result_prox.get("metrics")["loss"]
+
+        print(f"Loss Avg: {loss_avg}, Loss Prox: {loss_prox}")
+        assert loss_prox > loss_avg
+
+    def test_malformed_params_handling(self, executor, basic_job_config, mock_data_loader):
+        """Test that malformed incoming params are handled gracefully (warning logged)."""
+        # Ensure we don't crash when params are malformed
+        torch.manual_seed(42)
+
+        job = basic_job_config.copy()
+        shareable = Shareable()
+        shareable.set_header("job_config", json.dumps(job))
+
+        # Malformed params: list instead of dict (executor expects dict for state_dict)
+        # OR compatible dict but incompatible shapes
+        shareable["params"] = {"invalid_layer": [1.0, 2.0]}
+        # This will raise RuntimeError in load_state_dict because of strict=True (default)
+        # or mismatch keys if we used strict=False (but we use default).
+
+        # We just want to ensure it doesn't crash execution
+        result = executor.execute(
+            task_name="train",
+            shareable=shareable,
+            fl_ctx=FLContext(),
+            abort_signal=Signal()
+        )
+
+        assert result.get_return_code() == "OK" # Or Shareable default return code
+        # Ideally we check logs, but verifying return code is OK implies exception was caught
+
+    def test_proximal_mu_configuration(self, executor, basic_job_config, mock_data_loader):
+        """Test that proximal_mu defaults correctly and can be overridden."""
+        # 1. Default
+        job = FederationJob(**basic_job_config)
+        assert job.proximal_mu == 0.01
+
+        # 2. Override
+        basic_job_config["proximal_mu"] = 0.5
+        job = FederationJob(**basic_job_config)
+        assert job.proximal_mu == 0.5
+
+        # 3. Invalid
+        basic_job_config["proximal_mu"] = -0.1
+        with pytest.raises(ValueError, match="non-negative"):
+            FederationJob(**basic_job_config)

@@ -31,7 +31,7 @@ from coreason_enclave.data.loader import DataLoaderFactory
 from coreason_enclave.hardware.factory import get_attestation_provider
 from coreason_enclave.models.registry import ModelRegistry
 from coreason_enclave.privacy import PrivacyBudgetExceededError, PrivacyGuard
-from coreason_enclave.schemas import FederationJob
+from coreason_enclave.schemas import AggregationStrategy, FederationJob
 from coreason_enclave.sentry import DataSentry, FileExistenceValidator
 from coreason_enclave.utils.logger import logger
 
@@ -164,12 +164,29 @@ class CoreasonExecutor(Executor):  # type: ignore[misc]
 
             # Load incoming weights if any
             incoming_params = shareable.get("params")
+            global_params = None
             if incoming_params:
-                # In a real NVFlare setup, we'd need to convert dict to state_dict keys match
-                # For simplicity, assuming incoming_params is a valid state_dict or we skip if empty (initial round)
-                # Converting dict to model state_dict is non-trivial without knowing structure perfectly.
-                # We will assume for this "Atomic Unit" that we start fresh or the params match.
-                logger.info("Loaded incoming params")  # pragma: no cover
+                # Load weights into model
+                # Assuming incoming_params is a dict compatible with state_dict
+                try:
+                    # Convert list/numpy to tensor if needed
+                    state_dict = {
+                        k: torch.tensor(v) if not isinstance(v, torch.Tensor) else v
+                        for k, v in incoming_params.items()
+                    }
+                    model.load_state_dict(state_dict)
+                    logger.info("Loaded incoming params into model")
+
+                    # Keep a copy of global params for FedProx
+                    if job_config.strategy == AggregationStrategy.FED_PROX:
+                        logger.info("FedProx enabled. Capturing global params.")
+                        global_params = {
+                            k: v.clone().detach() for k, v in model.named_parameters() if v.requires_grad
+                        }
+                except Exception as e:
+                    logger.warning(f"Failed to load incoming params: {e}")
+                    # In some cases we might want to fail hard, but for robust initialization we log
+                    # However, for FedProx without global params, it degenerates to FedAvg or fails.
 
         except Exception as e:  # pragma: no cover
             logger.error(f"Data/Model loading failed: {e}")
@@ -210,6 +227,18 @@ class CoreasonExecutor(Executor):  # type: ignore[misc]
                     optimizer.zero_grad()
                     output = model(data)
                     loss = torch.nn.functional.mse_loss(output, target)
+
+                    # FedProx Logic
+                    if job_config.strategy == AggregationStrategy.FED_PROX and global_params:
+                        proximal_term = 0.0
+                        for name, param in model.named_parameters():
+                            # Opacus wraps model, adding _module. prefix
+                            clean_name = name.replace("_module.", "")
+                            if param.requires_grad and clean_name in global_params:
+                                proximal_term += (param - global_params[clean_name]).norm(2) ** 2
+
+                        loss += (job_config.proximal_mu / 2.0) * proximal_term
+
                     loss.backward()
                     optimizer.step()
 
