@@ -44,7 +44,7 @@ class TestScaffoldStrategy:
         )
 
     def test_scaffold_correction_calculation(self, executor: CoreasonExecutor) -> None:
-        """Test the mathematical correctness of the scaffold correction term."""
+        """Test the mathematical correctness of the scaffold correction term applied to params."""
         model = torch.nn.Linear(2, 1, bias=False)
         # Weights = [1.0, 1.0]
         with torch.no_grad():
@@ -56,13 +56,16 @@ class TestScaffoldStrategy:
         # c_local = [0.2, 0.2]
         c_local = {"weight": torch.tensor([[0.2, 0.2]])}
 
-        # Expected Correction Term to Loss:
-        # sum((cg - cl) * param)
-        # (0.5 - 0.2) * 1.0 + (0.5 - 0.2) * 1.0 = 0.3 + 0.3 = 0.6
+        # Update Rule: w = w - lr * (cg - cl)
+        # lr = 0.1
+        # cg - cl = [0.3, 0.3]
+        # w_new = 1.0 - 0.1 * 0.3 = 1.0 - 0.03 = 0.97
 
-        correction = executor._calculate_scaffold_correction(model, c_global, c_local)
+        lr = 0.1
+        executor._apply_scaffold_correction(model, c_global, c_local, lr)
 
-        assert torch.isclose(correction, torch.tensor(0.6))
+        expected_weight = torch.tensor([[0.97, 0.97]])
+        assert torch.allclose(model.weight, expected_weight)
 
     def test_scaffold_update_logic(self, executor: CoreasonExecutor) -> None:
         """Test the update logic for local controls."""
@@ -132,9 +135,9 @@ class TestScaffoldStrategy:
         c_global = {"weight": torch.zeros(1, 2), "bias": torch.zeros(1)}
         c_local = {"weight": torch.zeros(1, 2), "bias": torch.zeros(1)}
 
-        # Test _calculate_scaffold_correction with frozen param
-        # Should execute 'continue' for bias
-        executor._calculate_scaffold_correction(model, c_global, c_local)
+        # Test _apply_scaffold_correction with frozen param
+        # Should execute 'continue' for bias (no change in bias)
+        executor._apply_scaffold_correction(model, c_global, c_local, 0.1)
 
         # Test _update_scaffold_controls with frozen param
         # Should execute 'continue' for bias
@@ -144,6 +147,86 @@ class TestScaffoldStrategy:
         # Should contain weight but NOT bias
         assert "weight" in res
         assert "bias" not in res
+
+    def test_scaffold_shape_mismatch_resilience(self, executor: CoreasonExecutor) -> None:
+        """Test that SCAFFOLD handles shape mismatches gracefully (avoids crash)."""
+        model = torch.nn.Linear(2, 1)  # weight: [1, 2], bias: [1]
+
+        # Inject malformed local state: wrong shape for weight [1, 5] instead of [1, 2]
+        executor.scaffold_c_local = {
+            "weight": torch.randn(1, 5),
+            "bias": torch.randn(1)
+        }
+
+        c_global = {
+            "weight": torch.randn(1, 2),
+            "bias": torch.randn(1)
+        }
+
+        # Test correction calculation: Should skip 'weight' but process 'bias'
+        # If it crashes, test fails.
+        executor._apply_scaffold_correction(model, c_global, executor.scaffold_c_local, 0.1)
+
+        # Test update controls: Should skip 'weight' update
+        global_params = {
+            "weight": torch.randn(1, 2),
+            "bias": torch.randn(1)
+        }
+        updates = executor._update_scaffold_controls(model, c_global, global_params, 0.1, 10)
+
+        assert "weight" not in updates
+        assert "bias" in updates
+
+    def test_scaffold_multi_round_persistence(self, executor: CoreasonExecutor, job_config: FederationJob) -> None:
+        """Test complex scenario: Multiple rounds to verify state persistence."""
+
+        # Prepare Shareable Round 1
+        shareable1 = Shareable()
+        shareable1.set_header("job_config", job_config.model_dump_json())
+
+        params1 = {
+            "net.0.weight": torch.randn(16, 10),
+            "net.0.bias": torch.randn(16),
+            "net.2.weight": torch.randn(1, 16),
+            "net.2.bias": torch.randn(1),
+        }
+        shareable1["params"] = {k: v.numpy() for k, v in params1.items()}
+
+        # Initial c_global is 0
+        scaffold_c_global_1 = {k: torch.zeros_like(v).numpy() for k, v in params1.items()}
+        shareable1["scaffold_c_global"] = scaffold_c_global_1
+
+        # Execute Round 1
+        fl_ctx = FLContext()
+        abort_signal = Signal()
+        result1 = executor.execute("train", shareable1, fl_ctx, abort_signal)
+
+        assert result1.get_return_code() == ReturnCode.OK
+
+        # Verify c_local was updated from 0 to something non-zero (due to drift)
+        local_weight_r1 = executor.scaffold_c_local["net.0.weight"].clone()
+        assert not torch.allclose(local_weight_r1, torch.tensor(0.0))
+
+        # Prepare Shareable Round 2
+        # Use same executor instance!
+        shareable2 = Shareable()
+        shareable2.set_header("job_config", job_config.model_dump_json())
+
+        # New global params (simulated aggregation)
+        params2 = {k: v + 0.1 for k, v in params1.items()}
+        shareable2["params"] = {k: v.numpy() for k, v in params2.items()}
+
+        # New c_global (simulated aggregation)
+        scaffold_c_global_2 = {k: v + 0.01 for k, v in scaffold_c_global_1.items()}
+        shareable2["scaffold_c_global"] = scaffold_c_global_2
+
+        # Execute Round 2
+        result2 = executor.execute("train", shareable2, fl_ctx, abort_signal)
+        assert result2.get_return_code() == ReturnCode.OK
+
+        # Verify c_local has evolved further
+        local_weight_r2 = executor.scaffold_c_local["net.0.weight"]
+        assert not torch.allclose(local_weight_r2, local_weight_r1)
 
     def test_integration_execution(self, executor: CoreasonExecutor, job_config: FederationJob) -> None:
         """Test full execution flow with SCAFFOLD strategy."""

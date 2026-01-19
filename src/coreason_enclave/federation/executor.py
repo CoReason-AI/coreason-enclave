@@ -225,26 +225,24 @@ class CoreasonExecutor(Executor):  # type: ignore[misc]
 
         return (mu / 2.0) * proximal_term
 
-    def _calculate_scaffold_correction(
+    def _apply_scaffold_correction(
         self,
         model: torch.nn.Module,
         c_global: Dict[str, torch.Tensor],
         c_local: Dict[str, torch.Tensor],
-    ) -> torch.Tensor:
+        lr: float,
+    ) -> None:
         """
-        Calculate the SCAFFOLD drift correction term.
-        Adds linear term to loss to effectively add (c_global - c_local) to gradients.
-        correction_loss = sum( (c_global - c_local) * param )
+        Apply the SCAFFOLD drift correction directly to parameters.
+        Safe for Differential Privacy as it bypasses gradient clipping.
+        Update rule: w <- w - lr * (c_global - c_local)
 
         Args:
             model: The current model.
             c_global: Global control variates.
             c_local: Local control variates.
-
-        Returns:
-            torch.Tensor: The scalar correction term.
+            lr: Learning rate.
         """
-        correction = torch.tensor(0.0, device=next(model.parameters()).device)
         for name, param in model.named_parameters():
             if not param.requires_grad:
                 continue
@@ -256,14 +254,22 @@ class CoreasonExecutor(Executor):  # type: ignore[misc]
             cg = c_global.get(clean_name, torch.zeros_like(param))
             cl = c_local.get(clean_name, torch.zeros_like(param))
 
+            # Shape Check for Safety
+            if cg.shape != param.shape or cl.shape != param.shape:
+                logger.warning(
+                    f"SCAFFOLD shape mismatch for {clean_name}. "
+                    f"Param: {param.shape}, Global: {cg.shape}, Local: {cl.shape}. "
+                    "Skipping correction for this parameter."
+                )
+                continue
+
             # Ensure tensors are on same device
             cg = cg.to(param.device)
             cl = cl.to(param.device)
 
-            # Add to correction: (cg - cl) * param
-            correction += torch.sum((cg - cl) * param)
-
-        return correction
+            # Apply correction: w = w - lr * (cg - cl)
+            # Use data.add_ for in-place update without tracking gradients for this op
+            param.data.add_(-(cg - cl) * lr)
 
     def _update_scaffold_controls(
         self,
@@ -308,6 +314,15 @@ class CoreasonExecutor(Executor):  # type: ignore[misc]
 
             cg = c_global.get(clean_name, torch.zeros_like(w_local)).to(param.device)
             cl = self.scaffold_c_local.get(clean_name, torch.zeros_like(w_local)).to(param.device)
+
+            # Shape Check for Safety
+            if cg.shape != w_local.shape or cl.shape != w_local.shape or w_global.shape != w_local.shape:
+                logger.warning(
+                    f"SCAFFOLD shape mismatch for {clean_name} during update. "
+                    f"Local: {w_local.shape}, GlobalW: {w_global.shape}, CG: {cg.shape}, CL: {cl.shape}. "
+                    "Skipping update."
+                )
+                continue
 
             # c_local_new = cl - cg + (1 / (steps * lr)) * (w_global - w_local)
             # Factor for numerical stability
@@ -375,12 +390,19 @@ class CoreasonExecutor(Executor):  # type: ignore[misc]
                     if job_config.strategy == AggregationStrategy.FED_PROX and global_params is not None:
                         loss += self._calculate_proximal_loss(model, global_params, job_config.proximal_mu)
 
-                    # SCAFFOLD Logic
-                    if job_config.strategy == AggregationStrategy.SCAFFOLD and scaffold_c_global is not None:
-                        loss += self._calculate_scaffold_correction(model, scaffold_c_global, self.scaffold_c_local)
+                    # SCAFFOLD Logic (loss correction removed for DP safety)
+                    # if job_config.strategy == AggregationStrategy.SCAFFOLD and scaffold_c_global is not None:
+                    #     loss += self._calculate_scaffold_correction(model, scaffold_c_global, self.scaffold_c_local)
 
                     loss.backward()
                     optimizer.step()
+
+                    # SCAFFOLD Logic: Apply correction directly to params after optimizer step
+                    # w = w - lr * grad - lr * (c_global - c_local)
+                    if job_config.strategy == AggregationStrategy.SCAFFOLD and scaffold_c_global is not None:
+                        self._apply_scaffold_correction(
+                            model, scaffold_c_global, self.scaffold_c_local, DEFAULT_LR
+                        )
 
                     total_loss += loss.item()
                     num_batches += 1
