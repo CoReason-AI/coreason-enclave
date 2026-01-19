@@ -10,7 +10,7 @@
 
 import json
 import sys
-from typing import Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 from unittest.mock import MagicMock
 
 # NVFlare 2.7.1 has an issue on Windows where it imports 'resource' (Unix-only).
@@ -69,6 +69,10 @@ class CoreasonExecutor(Executor):  # type: ignore[misc]
         # For now, we use the FileExistenceValidator.
         self.sentry = DataSentry(validator=FileExistenceValidator())
         self.data_loader_factory = DataLoaderFactory(self.sentry)
+
+        # SCAFFOLD: Local Control Variate (c_local)
+        # Dictionary mapping parameter names to tensors.
+        self.scaffold_c_local: Dict[str, torch.Tensor] = {}
 
         logger.info(f"CoreasonExecutor initialized (train={training_task_name})")
 
@@ -154,7 +158,7 @@ class CoreasonExecutor(Executor):  # type: ignore[misc]
             job_config: The job configuration.
 
         Returns:
-            Optional[Dict[str, torch.Tensor]]: Global parameters for FedProx, or None.
+            Optional[Dict[str, torch.Tensor]]: Global parameters for FedProx or SCAFFOLD, or None.
         """
         incoming_params = shareable.get("params")
         global_params: Optional[Dict[str, torch.Tensor]] = None
@@ -168,15 +172,29 @@ class CoreasonExecutor(Executor):  # type: ignore[misc]
                 model.load_state_dict(state_dict)
                 logger.info("Loaded incoming params into model")
 
-                # Keep a copy of global params for FedProx
-                if job_config.strategy == AggregationStrategy.FED_PROX:
-                    logger.info("FedProx enabled. Capturing global params.")
+                # Keep a copy of global params for FedProx or SCAFFOLD
+                capture_global = (
+                    job_config.strategy == AggregationStrategy.FED_PROX
+                    or job_config.strategy == AggregationStrategy.SCAFFOLD
+                )
+                if capture_global:
+                    logger.info(f"Strategy {job_config.strategy}: Capturing global params.")
                     global_params = {k: v.clone().detach() for k, v in model.named_parameters() if v.requires_grad}
             except Exception as e:
                 logger.warning(f"Failed to load incoming params: {e}")
                 # We log warning but proceed, assuming robust initialization or fallback logic
 
         return global_params
+
+    def _get_scaffold_global(self, shareable: Shareable) -> Dict[str, torch.Tensor]:
+        """
+        Extract the global SCAFFOLD control variates from the shareable.
+        """
+        incoming = shareable.get("scaffold_c_global")
+        if not incoming:
+            return {}
+
+        return {k: torch.tensor(v) if not isinstance(v, torch.Tensor) else v for k, v in incoming.items()}
 
     def _calculate_proximal_loss(
         self,
@@ -207,6 +225,108 @@ class CoreasonExecutor(Executor):  # type: ignore[misc]
 
         return (mu / 2.0) * proximal_term
 
+    def _calculate_scaffold_correction(
+        self,
+        model: torch.nn.Module,
+        c_global: Dict[str, torch.Tensor],
+        c_local: Dict[str, torch.Tensor],
+    ) -> torch.Tensor:
+        """
+        Calculate the SCAFFOLD drift correction term.
+        Adds linear term to loss to effectively add (c_global - c_local) to gradients.
+        correction_loss = sum( (c_global - c_local) * param )
+
+        Args:
+            model: The current model.
+            c_global: Global control variates.
+            c_local: Local control variates.
+
+        Returns:
+            torch.Tensor: The scalar correction term.
+        """
+        correction = torch.tensor(0.0, device=next(model.parameters()).device)
+        for name, param in model.named_parameters():
+            if not param.requires_grad:
+                continue
+
+            # Handle Opacus prefix
+            clean_name = name.replace("_module.", "")
+
+            # Get control terms (default to 0 if missing)
+            cg = c_global.get(clean_name, torch.zeros_like(param))
+            cl = c_local.get(clean_name, torch.zeros_like(param))
+
+            # Ensure tensors are on same device
+            cg = cg.to(param.device)
+            cl = cl.to(param.device)
+
+            # Add to correction: (cg - cl) * param
+            correction += torch.sum((cg - cl) * param)
+
+        return correction
+
+    def _update_scaffold_controls(
+        self,
+        model: torch.nn.Module,
+        c_global: Dict[str, torch.Tensor],
+        global_params: Optional[Dict[str, torch.Tensor]],
+        lr: float,
+        steps: int,
+    ) -> Dict[str, Any]:
+        """
+        Update local control variates after training and compute the delta to send back.
+        Formula:
+        c_local_new = c_local - c_global + (1 / (K * lr)) * (w_global - w_local)
+        delta_c = c_local_new - c_local
+
+        Args:
+            model: Trained model.
+            c_global: Global controls used in this round.
+            global_params: Initial global parameters (w_global).
+            lr: Learning rate.
+            steps: Total number of local steps (epochs * batches).
+
+        Returns:
+            Dict[str, Any]: The scaffold updates to send back (c_diff).
+        """
+        # If we don't have global params (snapshot of start), we can't compute update
+        if global_params is None or steps <= 0:
+            return {}
+
+        c_diff = {}
+
+        for name, param in model.named_parameters():
+            if not param.requires_grad:
+                continue
+
+            clean_name = name.replace("_module.", "")
+            if clean_name not in global_params:
+                continue
+
+            w_global = global_params[clean_name].to(param.device)
+            w_local = param.detach()
+
+            cg = c_global.get(clean_name, torch.zeros_like(w_local)).to(param.device)
+            cl = self.scaffold_c_local.get(clean_name, torch.zeros_like(w_local)).to(param.device)
+
+            # c_local_new = cl - cg + (1 / (steps * lr)) * (w_global - w_local)
+            # Factor for numerical stability
+            factor = 1.0 / (steps * lr)
+            new_cl = cl - cg + factor * (w_global - w_local)
+
+            # Update local state
+            self.scaffold_c_local[clean_name] = new_cl.cpu()
+
+            # Compute diff to send back: c_local_new - c_local_old
+            # But wait, usually we send (c_local_new - c_local_old) as the update?
+            # Or just send the new c_local?
+            # Standard SCAFFOLD sends: delta_c = c_local_new - c_local_old
+            # Server updates: c_global_new = c_global + (1/N) * delta_c_sum
+            diff = new_cl - cl
+            c_diff[clean_name] = diff.cpu().numpy().tolist()
+
+        return c_diff
+
     def _run_training_loop(
         self,
         model: torch.nn.Module,
@@ -215,8 +335,9 @@ class CoreasonExecutor(Executor):  # type: ignore[misc]
         privacy_guard: PrivacyGuard,
         job_config: FederationJob,
         global_params: Optional[Dict[str, torch.Tensor]],
+        scaffold_c_global: Optional[Dict[str, torch.Tensor]],
         abort_signal: Signal,
-    ) -> Optional[Tuple[float, float]]:
+    ) -> Optional[Tuple[float, float, int]]:
         """
         Execute the main training loop.
 
@@ -227,14 +348,16 @@ class CoreasonExecutor(Executor):  # type: ignore[misc]
             privacy_guard: Privacy guard.
             job_config: Configuration.
             global_params: Global parameters for FedProx.
+            scaffold_c_global: Global control variates for SCAFFOLD.
             abort_signal: Signal.
 
         Returns:
-            Optional[Tuple[float, float]]: (average_loss, current_epsilon) or None if aborted/failed.
+            Optional[Tuple[float, float, int]]: (avg_loss, epsilon, total_steps) or None.
         """
         model.train()
         total_loss = 0.0
         num_batches = 0
+        total_steps = 0
         epochs = 1  # Local epochs per task execution
 
         try:
@@ -252,26 +375,27 @@ class CoreasonExecutor(Executor):  # type: ignore[misc]
                     if job_config.strategy == AggregationStrategy.FED_PROX and global_params is not None:
                         loss += self._calculate_proximal_loss(model, global_params, job_config.proximal_mu)
 
+                    # SCAFFOLD Logic
+                    if job_config.strategy == AggregationStrategy.SCAFFOLD and scaffold_c_global is not None:
+                        loss += self._calculate_scaffold_correction(model, scaffold_c_global, self.scaffold_c_local)
+
                     loss.backward()
                     optimizer.step()
 
                     total_loss += loss.item()
                     num_batches += 1
+                    total_steps += 1
 
                     # Check Privacy Budget
                     try:
                         privacy_guard.check_budget()
                     except PrivacyBudgetExceededError:
                         logger.critical("Privacy budget exceeded during training. Aborting.")
-                        # Returning None signals failure to the caller
-                        # (Caller should ideally map this to EXECUTION_EXCEPTION)
-                        # But wait, we need to propagate this specific error?
-                        # The original code caught it and returned EXECUTION_EXCEPTION.
                         raise
 
             avg_loss = total_loss / max(1, num_batches)
             epsilon = privacy_guard.get_current_epsilon()
-            return avg_loss, epsilon
+            return avg_loss, epsilon, total_steps
 
         except Exception as e:
             # Let caller handle exceptions
@@ -307,8 +431,13 @@ class CoreasonExecutor(Executor):  # type: ignore[misc]
             model_cls = ModelRegistry.get(model_arch)
             model = model_cls()
 
-            # Params (FedProx capture happens here)
+            # Params
             global_params = self._load_and_capture_params(model, shareable, job_config)
+
+            # SCAFFOLD: Get global controls
+            scaffold_c_global = None
+            if job_config.strategy == AggregationStrategy.SCAFFOLD:
+                scaffold_c_global = self._get_scaffold_global(shareable)
 
             # Privacy & Optimizer
             optimizer = optim.SGD(model.parameters(), lr=DEFAULT_LR)
@@ -324,20 +453,34 @@ class CoreasonExecutor(Executor):  # type: ignore[misc]
         # 4. Run Training Loop
         try:
             result = self._run_training_loop(
-                model, train_loader, optimizer, privacy_guard, job_config, global_params, abort_signal
+                model,
+                train_loader,
+                optimizer,
+                privacy_guard,
+                job_config,
+                global_params,
+                scaffold_c_global,
+                abort_signal,
             )
 
             if result is None:
                 # Aborted manually inside loop
                 return Shareable()
 
-            avg_loss, epsilon = result
+            avg_loss, epsilon, total_steps = result
 
         except Exception as e:
             logger.exception(f"Training loop failed: {e}")
             return make_reply(ReturnCode.EXECUTION_EXCEPTION)
 
-        # 5. Sanitize Output
+        # 5. SCAFFOLD Post-Processing
+        scaffold_updates = {}
+        if job_config.strategy == AggregationStrategy.SCAFFOLD and scaffold_c_global is not None:
+            scaffold_updates = self._update_scaffold_controls(
+                model, scaffold_c_global, global_params, DEFAULT_LR, total_steps
+            )
+
+        # 6. Sanitize Output
         outgoing_params = {k: v.cpu().numpy().tolist() for k, v in model.state_dict().items()}
 
         training_result = {
@@ -346,13 +489,16 @@ class CoreasonExecutor(Executor):  # type: ignore[misc]
             "meta": {"dataset_id": dataset_id, "model": model_arch},
         }
 
+        if scaffold_updates:
+            training_result["scaffold_updates"] = scaffold_updates
+
         try:
             sanitized_result = self.sentry.sanitize_output(training_result)
         except Exception as e:  # pragma: no cover
             logger.error(f"Output sanitation failed: {e}")
             return make_reply(ReturnCode.EXECUTION_EXCEPTION)
 
-        # 6. Return Result
+        # 7. Return Result
         result_shareable = Shareable()
         result_shareable.update(sanitized_result)
         return result_shareable
