@@ -176,6 +176,35 @@ class TestStrategies:
         metrics = strategy.after_training(model, lr=0.1, steps=1)
         assert metrics.get("scaffold_updates") == {}
 
+    def test_scaffold_frozen_params(self, basic_job_config: FederationJob) -> None:
+        """Test SCAFFOLD with frozen parameters (requires_grad=False)."""
+        c_local = {"weight": torch.zeros(1, 2), "bias": torch.zeros(1)}
+        strategy = ScaffoldStrategy(c_local)
+
+        model = torch.nn.Linear(2, 1)
+        # Freeze bias
+        model.bias.requires_grad = False
+
+        # c_global
+        shareable = Shareable()
+        shareable["params"] = {"dummy": 1}
+        shareable["scaffold_c_global"] = {"weight": torch.zeros(1, 2), "bias": torch.zeros(1)}
+
+        strategy.before_training(model, shareable, basic_job_config)
+
+        # 1. Test after_optimizer_step with frozen param
+        # Should hit 'continue' for bias
+        strategy.after_optimizer_step(model, lr=0.1)
+
+        # 2. Test after_training with frozen param
+        # Should hit 'continue' for bias
+        metrics = strategy.after_training(model, lr=0.1, steps=1)
+
+        # Should contain weight but NOT bias
+        updates = metrics.get("scaffold_updates", {})
+        assert "weight" in updates
+        assert "bias" not in updates
+
     def test_executor_unknown_strategy(self, basic_job_config: FederationJob) -> None:
         """Test executor raises error on unknown strategy."""
         executor = CoreasonExecutor()
