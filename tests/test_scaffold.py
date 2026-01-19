@@ -1,3 +1,13 @@
+# Copyright (c) 2025 CoReason, Inc.
+#
+# This software is proprietary and dual-licensed.
+# Licensed under the Prosperity Public License 3.0 (the "License").
+# A copy of the license is available at https://prosperitylicense.com/versions/3.0.0
+# For details, see the LICENSE file.
+# Commercial use beyond a 30-day trial requires a separate license.
+#
+# Source Code: https://github.com/CoReason-AI/coreason_enclave
+
 from typing import Any, Dict
 from unittest.mock import MagicMock
 
@@ -11,7 +21,7 @@ from coreason_enclave.federation.executor import CoreasonExecutor
 from coreason_enclave.schemas import AggregationStrategy, FederationJob, PrivacyConfig
 
 
-class TestScaffoldStrategy:
+class TestScaffoldIntegration:
     @pytest.fixture
     def executor(self) -> CoreasonExecutor:
         """Fixture for CoreasonExecutor."""
@@ -42,131 +52,6 @@ class TestScaffoldStrategy:
             strategy=AggregationStrategy.SCAFFOLD,
             privacy=PrivacyConfig(noise_multiplier=1.0, max_grad_norm=1.0, target_epsilon=10.0),
         )
-
-    def test_scaffold_correction_calculation(self, executor: CoreasonExecutor) -> None:
-        """Test the mathematical correctness of the scaffold correction term applied to params."""
-        model = torch.nn.Linear(2, 1, bias=False)
-        # Weights = [1.0, 1.0]
-        with torch.no_grad():
-            model.weight.fill_(1.0)
-
-        # c_global = [0.5, 0.5]
-        c_global = {"weight": torch.tensor([[0.5, 0.5]])}
-
-        # c_local = [0.2, 0.2]
-        c_local = {"weight": torch.tensor([[0.2, 0.2]])}
-
-        # Update Rule: w = w - lr * (cg - cl)
-        # lr = 0.1
-        # cg - cl = [0.3, 0.3]
-        # w_new = 1.0 - 0.1 * 0.3 = 1.0 - 0.03 = 0.97
-
-        lr = 0.1
-        executor._apply_scaffold_correction(model, c_global, c_local, lr)
-
-        expected_weight = torch.tensor([[0.97, 0.97]])
-        assert torch.allclose(model.weight, expected_weight)
-
-    def test_scaffold_update_logic(self, executor: CoreasonExecutor) -> None:
-        """Test the update logic for local controls."""
-        model = torch.nn.Linear(1, 1, bias=False)
-        # Initial Global Weight w = 1.0
-        # Final Local Weight w+ = 0.9 (simulated training update)
-        # c_local = 0.0
-        # c_global = 0.1
-        # lr = 0.1
-        # steps = 1
-
-        lr = 0.1
-        steps = 1
-
-        # Setup initial state
-        with torch.no_grad():
-            model.weight.fill_(0.9)
-
-        global_params = {"weight": torch.tensor([[1.0]])}
-        c_global = {"weight": torch.tensor([[0.1]])}
-        executor.scaffold_c_local = {"weight": torch.tensor([[0.0]])}
-
-        # Formula:
-        # new_cl = cl - cg + (1 / (steps * lr)) * (w - w_local)
-        # new_cl = 0.0 - 0.1 + (1 / 0.1) * (1.0 - 0.9)
-        # new_cl = -0.1 + 10 * 0.1
-        # new_cl = -0.1 + 1.0 = 0.9
-
-        updates = executor._update_scaffold_controls(model, c_global, global_params, lr, steps)
-
-        # Check internal state update
-        new_cl_tensor = executor.scaffold_c_local["weight"]
-        assert torch.isclose(new_cl_tensor, torch.tensor([[0.9]]))
-
-        # Check returned diff
-        # diff = new_cl - old_cl = 0.9 - 0.0 = 0.9
-        diff_val = updates["weight"][0][0]  # extract from list[list[float]]
-        assert abs(diff_val - 0.9) < 1e-6
-
-    def test_scaffold_edge_cases(self, executor: CoreasonExecutor) -> None:
-        """Test edge cases for SCAFFOLD logic."""
-        model = torch.nn.Linear(1, 1, bias=False)
-
-        # Case 1: get_scaffold_global with None/Empty
-        shareable = Shareable()
-        assert executor._get_scaffold_global(shareable) == {}
-
-        # Case 2: update_scaffold_controls with None global_params
-        res = executor._update_scaffold_controls(model, {}, None, 0.1, 10)
-        assert res == {}
-
-        # Case 3: update_scaffold_controls with 0 steps
-        res = executor._update_scaffold_controls(model, {}, {"weight": torch.tensor([1.0])}, 0.1, 0)
-        assert res == {}
-
-        # Case 4: Mismatched keys in global params
-        global_params = {"other_layer": torch.tensor([1.0])}
-        res = executor._update_scaffold_controls(model, {}, global_params, 0.1, 10)
-        assert res == {}
-
-    def test_scaffold_frozen_params(self, executor: CoreasonExecutor) -> None:
-        """Test SCAFFOLD with frozen parameters (requires_grad=False)."""
-        model = torch.nn.Linear(2, 1)
-        # Freeze bias
-        model.bias.requires_grad = False
-
-        c_global = {"weight": torch.zeros(1, 2), "bias": torch.zeros(1)}
-        c_local = {"weight": torch.zeros(1, 2), "bias": torch.zeros(1)}
-
-        # Test _apply_scaffold_correction with frozen param
-        # Should execute 'continue' for bias (no change in bias)
-        executor._apply_scaffold_correction(model, c_global, c_local, 0.1)
-
-        # Test _update_scaffold_controls with frozen param
-        # Should execute 'continue' for bias
-        global_params = {"weight": torch.zeros(1, 2), "bias": torch.zeros(1)}
-        res = executor._update_scaffold_controls(model, c_global, global_params, 0.1, 10)
-
-        # Should contain weight but NOT bias
-        assert "weight" in res
-        assert "bias" not in res
-
-    def test_scaffold_shape_mismatch_resilience(self, executor: CoreasonExecutor) -> None:
-        """Test that SCAFFOLD handles shape mismatches gracefully (avoids crash)."""
-        model = torch.nn.Linear(2, 1)  # weight: [1, 2], bias: [1]
-
-        # Inject malformed local state: wrong shape for weight [1, 5] instead of [1, 2]
-        executor.scaffold_c_local = {"weight": torch.randn(1, 5), "bias": torch.randn(1)}
-
-        c_global = {"weight": torch.randn(1, 2), "bias": torch.randn(1)}
-
-        # Test correction calculation: Should skip 'weight' but process 'bias'
-        # If it crashes, test fails.
-        executor._apply_scaffold_correction(model, c_global, executor.scaffold_c_local, 0.1)
-
-        # Test update controls: Should skip 'weight' update
-        global_params = {"weight": torch.randn(1, 2), "bias": torch.randn(1)}
-        updates = executor._update_scaffold_controls(model, c_global, global_params, 0.1, 10)
-
-        assert "weight" not in updates
-        assert "bias" in updates
 
     def test_scaffold_multi_round_persistence(self, executor: CoreasonExecutor, job_config: FederationJob) -> None:
         """Test complex scenario: Multiple rounds to verify state persistence."""
