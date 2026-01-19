@@ -177,3 +177,75 @@ class TestFedProx:
         basic_job_config["proximal_mu"] = -0.1
         with pytest.raises(ValueError, match="non-negative"):
             FederationJob(**basic_job_config)
+
+    def test_fed_prox_mu_zero(
+        self, executor: CoreasonExecutor, basic_job_config: Dict[str, Any], mock_data_loader: DataLoader[Any]
+    ) -> None:
+        """Test that setting proximal_mu=0 results in behavior identical to FED_AVG."""
+        # 1. Setup
+        initial_params = SimpleMLP().state_dict()
+        shareable_params = {k: v.clone() for k, v in initial_params.items()}
+
+        # --- RUN 1: FED_AVG ---
+        torch.manual_seed(42)
+        job_avg = basic_job_config.copy()
+        job_avg["strategy"] = "FED_AVG"
+        shareable_avg = Shareable()
+        shareable_avg.set_header("job_config", json.dumps(job_avg))
+        shareable_avg["params"] = shareable_params
+
+        result_avg = executor.execute(
+            task_name="train", shareable=shareable_avg, fl_ctx=FLContext(), abort_signal=Signal()
+        )
+        loss_avg = result_avg.get("metrics")["loss"]
+
+        # --- RUN 2: FED_PROX with mu=0 ---
+        torch.manual_seed(42)
+        job_prox_0 = basic_job_config.copy()
+        job_prox_0["strategy"] = "FED_PROX"
+        job_prox_0["proximal_mu"] = 0.0
+        shareable_prox_0 = Shareable()
+        shareable_prox_0.set_header("job_config", json.dumps(job_prox_0))
+        shareable_prox_0["params"] = shareable_params
+
+        result_prox_0 = executor.execute(
+            task_name="train", shareable=shareable_prox_0, fl_ctx=FLContext(), abort_signal=Signal()
+        )
+        loss_prox_0 = result_prox_0.get("metrics")["loss"]
+
+        # Expect identical loss
+        assert loss_avg == pytest.approx(loss_prox_0, rel=1e-6)
+
+    def test_fed_prox_no_incoming_params(
+        self, executor: CoreasonExecutor, basic_job_config: Dict[str, Any], mock_data_loader: DataLoader[Any]
+    ) -> None:
+        """Test that FedProx degrades gracefully (acts like FedAvg) if no global params are provided."""
+        # --- RUN 1: FED_AVG (No params provided) ---
+        torch.manual_seed(42)
+        job_avg = basic_job_config.copy()
+        job_avg["strategy"] = "FED_AVG"
+        shareable_avg = Shareable()
+        shareable_avg.set_header("job_config", json.dumps(job_avg))
+        # No params in shareable
+
+        result_avg = executor.execute(
+            task_name="train", shareable=shareable_avg, fl_ctx=FLContext(), abort_signal=Signal()
+        )
+        loss_avg = result_avg.get("metrics")["loss"]
+
+        # --- RUN 2: FED_PROX (No params provided) ---
+        torch.manual_seed(42)
+        job_prox = basic_job_config.copy()
+        job_prox["strategy"] = "FED_PROX"
+        job_prox["proximal_mu"] = 1.0  # Should be ignored as no global params
+        shareable_prox = Shareable()
+        shareable_prox.set_header("job_config", json.dumps(job_prox))
+        # No params in shareable
+
+        result_prox = executor.execute(
+            task_name="train", shareable=shareable_prox, fl_ctx=FLContext(), abort_signal=Signal()
+        )
+        loss_prox = result_prox.get("metrics")["loss"]
+
+        # Expect identical loss because proximal term calculation is skipped
+        assert loss_avg == pytest.approx(loss_prox, rel=1e-6)
