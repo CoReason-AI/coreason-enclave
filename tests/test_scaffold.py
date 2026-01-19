@@ -153,25 +153,16 @@ class TestScaffoldStrategy:
         model = torch.nn.Linear(2, 1)  # weight: [1, 2], bias: [1]
 
         # Inject malformed local state: wrong shape for weight [1, 5] instead of [1, 2]
-        executor.scaffold_c_local = {
-            "weight": torch.randn(1, 5),
-            "bias": torch.randn(1)
-        }
+        executor.scaffold_c_local = {"weight": torch.randn(1, 5), "bias": torch.randn(1)}
 
-        c_global = {
-            "weight": torch.randn(1, 2),
-            "bias": torch.randn(1)
-        }
+        c_global = {"weight": torch.randn(1, 2), "bias": torch.randn(1)}
 
         # Test correction calculation: Should skip 'weight' but process 'bias'
         # If it crashes, test fails.
         executor._apply_scaffold_correction(model, c_global, executor.scaffold_c_local, 0.1)
 
         # Test update controls: Should skip 'weight' update
-        global_params = {
-            "weight": torch.randn(1, 2),
-            "bias": torch.randn(1)
-        }
+        global_params = {"weight": torch.randn(1, 2), "bias": torch.randn(1)}
         updates = executor._update_scaffold_controls(model, c_global, global_params, 0.1, 10)
 
         assert "weight" not in updates
@@ -279,3 +270,37 @@ class TestScaffoldStrategy:
 
         # Verify local state was updated
         assert "net.0.weight" in executor.scaffold_c_local
+
+    def test_scaffold_strategy_isolation(self, executor: CoreasonExecutor, job_config: FederationJob) -> None:
+        """Test that other strategies (e.g. FED_AVG) do NOT affect SCAFFOLD state."""
+
+        # Modify job config to use FED_AVG
+        job_config.strategy = AggregationStrategy.FED_AVG
+        shareable = Shareable()
+        shareable.set_header("job_config", job_config.model_dump_json())
+
+        params = {
+            "net.0.weight": torch.randn(16, 10),
+            "net.0.bias": torch.randn(16),
+            "net.2.weight": torch.randn(1, 16),
+            "net.2.bias": torch.randn(1),
+        }
+        shareable["params"] = {k: v.numpy() for k, v in params.items()}
+
+        # Even if scaffold globals are provided (should be ignored by strategy check)
+        scaffold_c_global = {k: torch.zeros_like(v).numpy() for k, v in params.items()}
+        shareable["scaffold_c_global"] = scaffold_c_global
+
+        fl_ctx = FLContext()
+        abort_signal = Signal()
+
+        # Execute
+        result = executor.execute("train", shareable, fl_ctx, abort_signal)
+
+        assert result.get_return_code() == ReturnCode.OK
+
+        # Verify NO scaffold updates in output
+        assert "scaffold_updates" not in result
+
+        # Verify local state is EMPTY (assuming fresh executor)
+        assert len(executor.scaffold_c_local) == 0

@@ -400,9 +400,7 @@ class CoreasonExecutor(Executor):  # type: ignore[misc]
                     # SCAFFOLD Logic: Apply correction directly to params after optimizer step
                     # w = w - lr * grad - lr * (c_global - c_local)
                     if job_config.strategy == AggregationStrategy.SCAFFOLD and scaffold_c_global is not None:
-                        self._apply_scaffold_correction(
-                            model, scaffold_c_global, self.scaffold_c_local, DEFAULT_LR
-                        )
+                        self._apply_scaffold_correction(model, scaffold_c_global, self.scaffold_c_local, DEFAULT_LR)
 
                     total_loss += loss.item()
                     num_batches += 1
