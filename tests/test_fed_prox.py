@@ -24,7 +24,7 @@ from coreason_enclave.models.simple_mlp import SimpleMLP
 from coreason_enclave.schemas import FederationJob
 
 
-class TestFedProx:
+class TestFedProxIntegration:
     @pytest.fixture
     def basic_job_config(self) -> Dict[str, Any]:
         return {
@@ -283,5 +283,3 @@ class TestFedProx:
             result = executor.execute(task_name="train", shareable=shareable, fl_ctx=FLContext(), abort_signal=Signal())
 
             assert result.get_return_code() == "OK"
-            # We don't verify loss value here, just that it runs and hits the line (coverage check)
-            # and doesn't crash.

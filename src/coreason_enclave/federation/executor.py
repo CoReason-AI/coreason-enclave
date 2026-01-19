@@ -30,6 +30,12 @@ from nvflare.apis.signal import Signal
 from torch.utils.data import DataLoader
 
 from coreason_enclave.data.loader import DataLoaderFactory
+from coreason_enclave.federation.strategies import (
+    FedAvgStrategy,
+    FedProxStrategy,
+    ScaffoldStrategy,
+    TrainingStrategy,
+)
 from coreason_enclave.hardware.factory import get_attestation_provider
 from coreason_enclave.models.registry import ModelRegistry
 from coreason_enclave.privacy import PrivacyBudgetExceededError, PrivacyGuard
@@ -69,6 +75,10 @@ class CoreasonExecutor(Executor):  # type: ignore[misc]
         # For now, we use the FileExistenceValidator.
         self.sentry = DataSentry(validator=FileExistenceValidator())
         self.data_loader_factory = DataLoaderFactory(self.sentry)
+
+        # SCAFFOLD: Local Control Variate (c_local)
+        # Dictionary mapping parameter names to tensors.
+        self.scaffold_c_local: Dict[str, torch.Tensor] = {}
 
         logger.info(f"CoreasonExecutor initialized (train={training_task_name})")
 
@@ -142,70 +152,16 @@ class CoreasonExecutor(Executor):  # type: ignore[misc]
             logger.error(f"Invalid job_config: {e}")
             return None
 
-    def _load_and_capture_params(
-        self, model: torch.nn.Module, shareable: Shareable, job_config: FederationJob
-    ) -> Optional[Dict[str, torch.Tensor]]:
-        """
-        Load incoming parameters into the model and optionally capture them as global parameters.
-
-        Args:
-            model: The PyTorch model to update.
-            shareable: The input shareable containing 'params'.
-            job_config: The job configuration.
-
-        Returns:
-            Optional[Dict[str, torch.Tensor]]: Global parameters for FedProx, or None.
-        """
-        incoming_params = shareable.get("params")
-        global_params: Optional[Dict[str, torch.Tensor]] = None
-
-        if incoming_params:
-            try:
-                # Convert list/numpy to tensor if needed
-                state_dict = {
-                    k: torch.tensor(v) if not isinstance(v, torch.Tensor) else v for k, v in incoming_params.items()
-                }
-                model.load_state_dict(state_dict)
-                logger.info("Loaded incoming params into model")
-
-                # Keep a copy of global params for FedProx
-                if job_config.strategy == AggregationStrategy.FED_PROX:
-                    logger.info("FedProx enabled. Capturing global params.")
-                    global_params = {k: v.clone().detach() for k, v in model.named_parameters() if v.requires_grad}
-            except Exception as e:
-                logger.warning(f"Failed to load incoming params: {e}")
-                # We log warning but proceed, assuming robust initialization or fallback logic
-
-        return global_params
-
-    def _calculate_proximal_loss(
-        self,
-        model: torch.nn.Module,
-        global_params: Dict[str, torch.Tensor],
-        mu: float,
-    ) -> torch.Tensor:
-        """
-        Calculate the FedProx proximal term: (mu / 2) * ||w - w_global||^2.
-
-        Args:
-            model: The current model.
-            global_params: The global parameters (snapshot).
-            mu: The proximal coefficient.
-
-        Returns:
-            torch.Tensor: The scalar proximal loss term.
-        """
-        proximal_term = torch.tensor(0.0, device=next(model.parameters()).device)
-        for name, param in model.named_parameters():
-            if not param.requires_grad:
-                continue
-
-            # Opacus wraps model, adding _module. prefix
-            clean_name = name.replace("_module.", "")
-            if clean_name in global_params:
-                proximal_term += (param - global_params[clean_name]).norm(2) ** 2
-
-        return (mu / 2.0) * proximal_term
+    def _get_strategy(self, job_config: FederationJob) -> TrainingStrategy:
+        """Factory method to get the training strategy."""
+        if job_config.strategy == AggregationStrategy.FED_AVG:
+            return FedAvgStrategy()
+        elif job_config.strategy == AggregationStrategy.FED_PROX:
+            return FedProxStrategy()
+        elif job_config.strategy == AggregationStrategy.SCAFFOLD:
+            return ScaffoldStrategy(self.scaffold_c_local)
+        else:
+            raise ValueError(f"Unknown strategy: {job_config.strategy}")
 
     def _run_training_loop(
         self,
@@ -213,10 +169,9 @@ class CoreasonExecutor(Executor):  # type: ignore[misc]
         train_loader: DataLoader,
         optimizer: optim.Optimizer,
         privacy_guard: PrivacyGuard,
-        job_config: FederationJob,
-        global_params: Optional[Dict[str, torch.Tensor]],
+        strategy: TrainingStrategy,
         abort_signal: Signal,
-    ) -> Optional[Tuple[float, float]]:
+    ) -> Optional[Tuple[float, float, int]]:
         """
         Execute the main training loop.
 
@@ -225,16 +180,16 @@ class CoreasonExecutor(Executor):  # type: ignore[misc]
             train_loader: Data loader.
             optimizer: Optimizer.
             privacy_guard: Privacy guard.
-            job_config: Configuration.
-            global_params: Global parameters for FedProx.
+            strategy: The active training strategy.
             abort_signal: Signal.
 
         Returns:
-            Optional[Tuple[float, float]]: (average_loss, current_epsilon) or None if aborted/failed.
+            Optional[Tuple[float, float, int]]: (avg_loss, epsilon, total_steps) or None.
         """
         model.train()
         total_loss = 0.0
         num_batches = 0
+        total_steps = 0
         epochs = 1  # Local epochs per task execution
 
         try:
@@ -248,30 +203,29 @@ class CoreasonExecutor(Executor):  # type: ignore[misc]
                     output = model(data)
                     loss = torch.nn.functional.mse_loss(output, target)
 
-                    # FedProx Logic
-                    if job_config.strategy == AggregationStrategy.FED_PROX and global_params is not None:
-                        loss += self._calculate_proximal_loss(model, global_params, job_config.proximal_mu)
+                    # Strategy-specific loss correction (e.g., FedProx)
+                    loss += strategy.calculate_loss_correction(model)
 
                     loss.backward()
                     optimizer.step()
 
+                    # Strategy-specific post-step logic (e.g., SCAFFOLD)
+                    strategy.after_optimizer_step(model, DEFAULT_LR)
+
                     total_loss += loss.item()
                     num_batches += 1
+                    total_steps += 1
 
                     # Check Privacy Budget
                     try:
                         privacy_guard.check_budget()
                     except PrivacyBudgetExceededError:
                         logger.critical("Privacy budget exceeded during training. Aborting.")
-                        # Returning None signals failure to the caller
-                        # (Caller should ideally map this to EXECUTION_EXCEPTION)
-                        # But wait, we need to propagate this specific error?
-                        # The original code caught it and returned EXECUTION_EXCEPTION.
                         raise
 
             avg_loss = total_loss / max(1, num_batches)
             epsilon = privacy_guard.get_current_epsilon()
-            return avg_loss, epsilon
+            return avg_loss, epsilon, total_steps
 
         except Exception as e:
             # Let caller handle exceptions
@@ -285,7 +239,6 @@ class CoreasonExecutor(Executor):  # type: ignore[misc]
     ) -> Shareable:
         """
         Orchestrate the training workflow.
-        Refactored to compose smaller methods.
         """
         # 1. Check Hardware Trust
         self._check_hardware_trust()
@@ -307,8 +260,23 @@ class CoreasonExecutor(Executor):  # type: ignore[misc]
             model_cls = ModelRegistry.get(model_arch)
             model = model_cls()
 
-            # Params (FedProx capture happens here)
-            global_params = self._load_and_capture_params(model, shareable, job_config)
+            # Initialize Strategy
+            strategy = self._get_strategy(job_config)
+
+            # Params
+            incoming_params = shareable.get("params")
+            if incoming_params:
+                try:
+                    state_dict = {
+                        k: torch.tensor(v) if not isinstance(v, torch.Tensor) else v for k, v in incoming_params.items()
+                    }
+                    model.load_state_dict(state_dict)
+                    logger.info("Loaded incoming params into model")
+                except Exception as e:
+                    logger.warning(f"Failed to load incoming params: {e}")
+
+            # Strategy Hook: Before Training (e.g., capture global params)
+            strategy.before_training(model, shareable, job_config)
 
             # Privacy & Optimizer
             optimizer = optim.SGD(model.parameters(), lr=DEFAULT_LR)
@@ -324,20 +292,28 @@ class CoreasonExecutor(Executor):  # type: ignore[misc]
         # 4. Run Training Loop
         try:
             result = self._run_training_loop(
-                model, train_loader, optimizer, privacy_guard, job_config, global_params, abort_signal
+                model,
+                train_loader,
+                optimizer,
+                privacy_guard,
+                strategy,
+                abort_signal,
             )
 
             if result is None:
                 # Aborted manually inside loop
                 return Shareable()
 
-            avg_loss, epsilon = result
+            avg_loss, epsilon, total_steps = result
 
         except Exception as e:
             logger.exception(f"Training loop failed: {e}")
             return make_reply(ReturnCode.EXECUTION_EXCEPTION)
 
-        # 5. Sanitize Output
+        # 5. Strategy Hook: After Training (e.g., SCAFFOLD updates)
+        extra_metrics = strategy.after_training(model, DEFAULT_LR, total_steps)
+
+        # 6. Sanitize Output
         outgoing_params = {k: v.cpu().numpy().tolist() for k, v in model.state_dict().items()}
 
         training_result = {
@@ -345,6 +321,7 @@ class CoreasonExecutor(Executor):  # type: ignore[misc]
             "metrics": {"loss": avg_loss, "epsilon": epsilon},
             "meta": {"dataset_id": dataset_id, "model": model_arch},
         }
+        training_result.update(extra_metrics)
 
         try:
             sanitized_result = self.sentry.sanitize_output(training_result)
@@ -352,7 +329,7 @@ class CoreasonExecutor(Executor):  # type: ignore[misc]
             logger.error(f"Output sanitation failed: {e}")
             return make_reply(ReturnCode.EXECUTION_EXCEPTION)
 
-        # 6. Return Result
+        # 7. Return Result
         result_shareable = Shareable()
         result_shareable.update(sanitized_result)
         return result_shareable
