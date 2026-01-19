@@ -78,7 +78,7 @@ class DataSentry:
             validator: An implementation of ValidatorProtocol.
         """
         self.validator = validator
-        self.allowed_output_keys = {"params", "metrics", "meta"}
+        self.allowed_output_keys = {"params", "metrics", "meta", "scaffold_updates"}
         # Blocklist for sensitive keys that should NEVER appear, even nested.
         self.sensitive_keys = {"private_key", "secret", "patient_id", "raw_data", "pii"}
         logger.info("DataSentry initialized.")
