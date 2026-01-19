@@ -8,23 +8,23 @@
 #
 # Source Code: https://github.com/CoReason-AI/coreason_enclave
 
+import json
+from typing import Any, Dict
+from unittest.mock import MagicMock
+
 import pytest
 import torch
-import json
-from unittest.mock import MagicMock
-from nvflare.apis.shareable import Shareable
 from nvflare.apis.fl_context import FLContext
+from nvflare.apis.shareable import Shareable
 from nvflare.apis.signal import Signal
-
-from coreason_enclave.federation.executor import CoreasonExecutor
-from coreason_enclave.schemas import FederationJob, AggregationStrategy, PrivacyConfig
-from coreason_enclave.models.registry import ModelRegistry
-from coreason_enclave.models.simple_mlp import SimpleMLP
-from typing import Dict, Any
 from torch.utils.data import DataLoader
 
-class TestFedProx:
+from coreason_enclave.federation.executor import CoreasonExecutor
+from coreason_enclave.models.simple_mlp import SimpleMLP
+from coreason_enclave.schemas import FederationJob
 
+
+class TestFedProx:
     @pytest.fixture
     def basic_job_config(self) -> Dict[str, Any]:
         return {
@@ -35,11 +35,7 @@ class TestFedProx:
             "dataset_id": "test_data.csv",
             "model_arch": "SimpleMLP",
             "strategy": "FED_AVG",  # Default to FED_AVG
-            "privacy": {
-                "noise_multiplier": 1.0,
-                "max_grad_norm": 1.0,
-                "target_epsilon": 10.0
-            }
+            "privacy": {"noise_multiplier": 1.0, "max_grad_norm": 1.0, "target_epsilon": 10.0},
         }
 
     @pytest.fixture
@@ -69,7 +65,9 @@ class TestFedProx:
 
         return executor
 
-    def test_fed_prox_vs_fed_avg(self, executor: CoreasonExecutor, basic_job_config: Dict[str, Any], mock_data_loader: DataLoader[Any]) -> None:
+    def test_fed_prox_vs_fed_avg(
+        self, executor: CoreasonExecutor, basic_job_config: Dict[str, Any], mock_data_loader: DataLoader[Any]
+    ) -> None:
         """
         Test that FED_PROX produces a higher loss than FED_AVG given the same inputs
         and weights, because of the added proximal term.
@@ -92,10 +90,7 @@ class TestFedProx:
 
         # Execute FedAvg
         result_avg = executor.execute(
-            task_name="train",
-            shareable=shareable_avg,
-            fl_ctx=FLContext(),
-            abort_signal=Signal()
+            task_name="train", shareable=shareable_avg, fl_ctx=FLContext(), abort_signal=Signal()
         )
 
         loss_avg = result_avg.get("metrics")["loss"]
@@ -134,10 +129,7 @@ class TestFedProx:
         shareable_prox["params"] = shareable_params
 
         result_prox = executor.execute(
-            task_name="train",
-            shareable=shareable_prox,
-            fl_ctx=FLContext(),
-            abort_signal=Signal()
+            task_name="train", shareable=shareable_prox, fl_ctx=FLContext(), abort_signal=Signal()
         )
 
         loss_prox = result_prox.get("metrics")["loss"]
@@ -145,7 +137,9 @@ class TestFedProx:
         print(f"Loss Avg: {loss_avg}, Loss Prox: {loss_prox}")
         assert loss_prox > loss_avg
 
-    def test_malformed_params_handling(self, executor: CoreasonExecutor, basic_job_config: Dict[str, Any], mock_data_loader: DataLoader[Any]) -> None:
+    def test_malformed_params_handling(
+        self, executor: CoreasonExecutor, basic_job_config: Dict[str, Any], mock_data_loader: DataLoader[Any]
+    ) -> None:
         """Test that malformed incoming params are handled gracefully (warning logged)."""
         # Ensure we don't crash when params are malformed
         torch.manual_seed(42)
@@ -161,17 +155,14 @@ class TestFedProx:
         # or mismatch keys if we used strict=False (but we use default).
 
         # We just want to ensure it doesn't crash execution
-        result = executor.execute(
-            task_name="train",
-            shareable=shareable,
-            fl_ctx=FLContext(),
-            abort_signal=Signal()
-        )
+        result = executor.execute(task_name="train", shareable=shareable, fl_ctx=FLContext(), abort_signal=Signal())
 
-        assert result.get_return_code() == "OK" # Or Shareable default return code
+        assert result.get_return_code() == "OK"  # Or Shareable default return code
         # Ideally we check logs, but verifying return code is OK implies exception was caught
 
-    def test_proximal_mu_configuration(self, executor: CoreasonExecutor, basic_job_config: Dict[str, Any], mock_data_loader: DataLoader[Any]) -> None:
+    def test_proximal_mu_configuration(
+        self, executor: CoreasonExecutor, basic_job_config: Dict[str, Any], mock_data_loader: DataLoader[Any]
+    ) -> None:
         """Test that proximal_mu defaults correctly and can be overridden."""
         # 1. Default
         job = FederationJob(**basic_job_config)

@@ -171,8 +171,7 @@ class CoreasonExecutor(Executor):  # type: ignore[misc]
                 try:
                     # Convert list/numpy to tensor if needed
                     state_dict = {
-                        k: torch.tensor(v) if not isinstance(v, torch.Tensor) else v
-                        for k, v in incoming_params.items()
+                        k: torch.tensor(v) if not isinstance(v, torch.Tensor) else v for k, v in incoming_params.items()
                     }
                     model.load_state_dict(state_dict)
                     logger.info("Loaded incoming params into model")
@@ -180,9 +179,7 @@ class CoreasonExecutor(Executor):  # type: ignore[misc]
                     # Keep a copy of global params for FedProx
                     if job_config.strategy == AggregationStrategy.FED_PROX:
                         logger.info("FedProx enabled. Capturing global params.")
-                        global_params = {
-                            k: v.clone().detach() for k, v in model.named_parameters() if v.requires_grad
-                        }
+                        global_params = {k: v.clone().detach() for k, v in model.named_parameters() if v.requires_grad}
                 except Exception as e:
                     logger.warning(f"Failed to load incoming params: {e}")
                     # In some cases we might want to fail hard, but for robust initialization we log
