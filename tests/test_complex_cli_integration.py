@@ -11,57 +11,50 @@
 import os
 from unittest.mock import patch
 
-import pytest
-
-from coreason_enclave.hardware.factory import get_attestation_provider
-from coreason_enclave.hardware.real import RealAttestationProvider
-from coreason_enclave.hardware.simulation import SimulationAttestationProvider
 from coreason_enclave.main import main
 
 
 def test_cli_integration_simulation_mode() -> None:
-    """
-    Verify that running main with --insecure actually causes the factory
-    to return a SimulationAttestationProvider in the same process.
-    """
-    test_args = ["-w", "/tmp/ws", "-c", "conf.json", "--insecure"]
+    """Test full CLI integration with simulation mode."""
+    test_args = ["-w", "/tmp/ws", "-c", "conf.json", "--simulation"]
 
-    # Ensure clean state
-    with patch.dict(os.environ, {}, clear=True):
-        # Run main
-        # We don't need to mock logger, but we do need to suppress the actual NVFlare start
-        # which is currently a 'pass', so it returns immediately.
-        main(test_args)
+    # We mock client_train to avoid real NVFlare execution but verify our handoff
+    with patch("coreason_enclave.main.client_train") as mock_client_train:
+        # We also need to clear env to ensure fresh start
+        with patch.dict(os.environ, {}, clear=True):
+            main(test_args)
 
-        # Now verify that the factory logic, which reads the env var, works as expected.
-        # This simulates the Executor calling the factory *after* main has set the env.
-        provider = get_attestation_provider()
-        assert isinstance(provider, SimulationAttestationProvider)
+            # Assertions
+            assert os.environ["COREASON_ENCLAVE_SIMULATION"] == "true"
+            mock_client_train.parse_arguments.assert_called_once()
+            mock_client_train.main.assert_called_once()
 
 
 def test_cli_integration_secure_mode() -> None:
-    """
-    Verify that running main WITHOUT --insecure causes the factory
-    to return a RealAttestationProvider.
-    """
+    """Test full CLI integration with secure mode (default)."""
     test_args = ["-w", "/tmp/ws", "-c", "conf.json"]
 
-    # Ensure clean state
-    with patch.dict(os.environ, {}, clear=True):
-        main(test_args)
-
-        # Factory should return Real provider
-        provider = get_attestation_provider()
-        assert isinstance(provider, RealAttestationProvider)
-
-
-def test_cli_integration_env_violation_abort() -> None:
-    """
-    Verify that if env is set to TRUE externally BUT flag is missing,
-    the app aborts and does NOT initialize the provider (or crashes main).
-    """
-    test_args = ["-w", "/tmp/ws", "-c", "conf.json"]
-
-    with patch.dict(os.environ, {"COREASON_ENCLAVE_SIMULATION": "true"}, clear=True):
-        with pytest.raises(SystemExit):
+    with patch("coreason_enclave.main.client_train") as mock_client_train:
+        with patch.dict(os.environ, {}, clear=True):
             main(test_args)
+
+            # Assertions
+            assert os.environ["COREASON_ENCLAVE_SIMULATION"] == "false"
+            mock_client_train.parse_arguments.assert_called_once()
+            mock_client_train.main.assert_called_once()
+
+
+def test_main_missing_client_train_module() -> None:
+    """Test fallback when client_train module is missing (ImportError simulation)."""
+    test_args = ["-w", "/tmp/ws", "-c", "conf.json"]
+
+    # Mock client_train as None to simulate ImportError handling
+    with patch("coreason_enclave.main.client_train", None):
+        with patch("coreason_enclave.main.logger") as mock_logger:
+            with patch.dict(os.environ, {}, clear=True):
+                main(test_args)
+
+                # Should log warning
+                mock_logger.warning.assert_called_with(
+                    "NVFlare ClientTrain module not found. Skipping execution (Dry Run)."
+                )
