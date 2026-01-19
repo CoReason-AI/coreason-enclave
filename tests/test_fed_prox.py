@@ -20,11 +20,13 @@ from coreason_enclave.federation.executor import CoreasonExecutor
 from coreason_enclave.schemas import FederationJob, AggregationStrategy, PrivacyConfig
 from coreason_enclave.models.registry import ModelRegistry
 from coreason_enclave.models.simple_mlp import SimpleMLP
+from typing import Dict, Any
+from torch.utils.data import DataLoader
 
 class TestFedProx:
 
     @pytest.fixture
-    def basic_job_config(self):
+    def basic_job_config(self) -> Dict[str, Any]:
         return {
             "job_id": "123e4567-e89b-12d3-a456-426614174000",
             "clients": ["client1", "client2"],
@@ -41,7 +43,7 @@ class TestFedProx:
         }
 
     @pytest.fixture
-    def mock_data_loader(self):
+    def mock_data_loader(self) -> DataLoader[Any]:
         # Use real DataLoader as Opacus inspects it deeply
         # Increase dataset size to avoid exploding epsilon (small dataset = high sampling rate)
         n_samples = 1000
@@ -52,7 +54,7 @@ class TestFedProx:
         return torch.utils.data.DataLoader(dataset, batch_size=32, shuffle=False)
 
     @pytest.fixture
-    def executor(self, mock_data_loader):
+    def executor(self, mock_data_loader: DataLoader[Any]) -> CoreasonExecutor:
         executor = CoreasonExecutor()
         executor.attestation_provider = MagicMock()
         executor.attestation_provider.attest.return_value.status = "TRUSTED"
@@ -67,7 +69,7 @@ class TestFedProx:
 
         return executor
 
-    def test_fed_prox_vs_fed_avg(self, executor, basic_job_config, mock_data_loader):
+    def test_fed_prox_vs_fed_avg(self, executor: CoreasonExecutor, basic_job_config: Dict[str, Any], mock_data_loader: DataLoader[Any]) -> None:
         """
         Test that FED_PROX produces a higher loss than FED_AVG given the same inputs
         and weights, because of the added proximal term.
@@ -143,7 +145,7 @@ class TestFedProx:
         print(f"Loss Avg: {loss_avg}, Loss Prox: {loss_prox}")
         assert loss_prox > loss_avg
 
-    def test_malformed_params_handling(self, executor, basic_job_config, mock_data_loader):
+    def test_malformed_params_handling(self, executor: CoreasonExecutor, basic_job_config: Dict[str, Any], mock_data_loader: DataLoader[Any]) -> None:
         """Test that malformed incoming params are handled gracefully (warning logged)."""
         # Ensure we don't crash when params are malformed
         torch.manual_seed(42)
@@ -169,7 +171,7 @@ class TestFedProx:
         assert result.get_return_code() == "OK" # Or Shareable default return code
         # Ideally we check logs, but verifying return code is OK implies exception was caught
 
-    def test_proximal_mu_configuration(self, executor, basic_job_config, mock_data_loader):
+    def test_proximal_mu_configuration(self, executor: CoreasonExecutor, basic_job_config: Dict[str, Any], mock_data_loader: DataLoader[Any]) -> None:
         """Test that proximal_mu defaults correctly and can be overridden."""
         # 1. Default
         job = FederationJob(**basic_job_config)
