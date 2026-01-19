@@ -99,9 +99,17 @@ def test_main_exception_handling() -> None:
 
 def test_main_opts() -> None:
     """Test main with additional opts."""
-    with patch("coreason_enclave.main.logger"):
-        main(["-w", "w", "-c", "c", "opt1", "opt2"])
-        # If no crash, coverage hit
+    # We must mock client_train because main now calls it, and it will fail on dummy opts
+    with patch("coreason_enclave.main.client_train") as mock_ct:
+        with patch("coreason_enclave.main.logger"):
+            # We mock parse_arguments to succeed
+            mock_ct.parse_arguments.return_value = MagicMock()
+
+            main(["-w", "w", "-c", "c", "opt1", "opt2"])
+
+            # Verify opts were passed to sys.argv (implicitly tested by logic, but we can assume success if no crash)
+            mock_ct.parse_arguments.assert_called_once()
+            mock_ct.main.assert_called_once()
 
 
 def test_loader_tensor_dict_success(tmp_path: Path) -> None:

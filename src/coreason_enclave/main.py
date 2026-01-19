@@ -11,22 +11,29 @@
 import argparse
 import os
 import sys
-from typing import Optional
+from typing import List, Optional
 
 # Workaround for NVFlare Windows issue
 if sys.platform == "win32":  # pragma: no cover
     from unittest.mock import MagicMock
 
     try:
-        import resource  # type: ignore # noqa: F401
+        import resource  # noqa: F401
     except ImportError:
         sys.modules["resource"] = MagicMock()
 
+try:
+    # Try importing NVFlare client logic
+    import nvflare.private.fed.app.client.client_train as client_train
+except ImportError:
+    # Fallback for environments without nvflare installed (e.g. specialized test envs)
+    # or if the internal path changes.
+    client_train = None
 
 from coreason_enclave.utils.logger import logger
 
 
-def configure_security_mode(simulation_flag: bool, insecure_flag: bool) -> None:
+def apply_security_policy(simulation_flag: bool, insecure_flag: bool) -> None:
     """
     Configure the security mode for the Enclave Agent.
     Strictly enforces the presence of the --insecure or --simulation flag for simulation mode.
@@ -62,6 +69,42 @@ def configure_security_mode(simulation_flag: bool, insecure_flag: bool) -> None:
         logger.info("Running in SECURE HARDWARE MODE. TEE Attestation required.")
 
 
+def _build_nvflare_args(parsed_args: argparse.Namespace) -> List[str]:
+    """
+    Construct the argument list for NVFlare ClientTrain.
+
+    Args:
+        parsed_args: The arguments parsed by coreason-enclave.
+
+    Returns:
+        List[str]: The argument list for nvflare.
+    """
+    # NVFlare client_train.py expects:
+    # --workspace (-m) <workspace>
+    # --fed_client (-s) <client config file>
+    # --set KEY=VALUE ...
+    # --local_rank <int>
+
+    # coreason-enclave args: -w/--workspace, -c/--conf
+    # Mapping:
+    # -w -> -m (workspace)
+    # -c -> -s (fed_client / config)
+
+    args = [
+        "coreason_enclave_wrapper",  # Prog name for argv[0]
+        "-m",
+        parsed_args.workspace,
+        "-s",
+        parsed_args.conf,
+    ]
+
+    # Pass through other options if they match NVFlare structure
+    if parsed_args.opts:
+        args.extend(parsed_args.opts)
+
+    return args
+
+
 def main(args: Optional[list[str]] = None) -> None:
     """
     Entry point for the Coreason Enclave Agent.
@@ -89,71 +132,35 @@ def main(args: Optional[list[str]] = None) -> None:
     try:
         parsed_args = parser.parse_args(args)
 
-        # Validate and Configure Security
-        configure_security_mode(simulation_flag=parsed_args.simulation, insecure_flag=parsed_args.insecure)
-
-        # Parse additional options
-        # NVFlare expects args object to have attributes for these options
-        # We construct the command for ClientTrain
+        # 1. Validate and Configure Security
+        apply_security_policy(simulation_flag=parsed_args.simulation, insecure_flag=parsed_args.insecure)
 
         logger.info(f"Workspace: {parsed_args.workspace}")
         logger.info(f"Config: {parsed_args.conf}")
 
-        # ClientTrain is the main class in NVFlare to start a client
-        # It parses args internally usually, but we can instantiate it programmatically
-        # or call its main(). However, ClientTrain.main() parses sys.argv.
-        # So we might need to manipulate sys.argv or use the class directly if possible.
+        # 2. Construct NVFlare arguments
+        nvflare_argv = _build_nvflare_args(parsed_args)
 
-        # A safer way integration-wise for NVFlare is to set sys.argv and call their main,
-        # or use their internal API if stable.
-        # Let's try to mimic the command line invocation for ClientTrain.
+        # 3. Invoke NVFlare Client
+        if client_train:
+            logger.info("Invoking NVFlare ClientTrain...")
 
-        # We need to ensure sys.argv is set correctly for ClientTrain if we call its main
-        sys_argv_backup = sys.argv
-
-        new_argv = [
-            "coreason_enclave",
-            "-w",
-            parsed_args.workspace,
-            "-c",
-            parsed_args.conf,
-            "-m",
-            parsed_args.workspace,  # startup dir
-            # Add other necessary flags for NVFlare
-        ]
-        if parsed_args.opts:
-            new_argv.extend(parsed_args.opts)
-
-        sys.argv = new_argv
-
-        logger.info("Invoking NVFlare ClientTrain...")
-        # We instantiate ClientTrain logic.
-        # Note: ClientTrain doesn't have a static main() usually, it's a script.
-        # But 'nvflare.private.fed.app.client.client_train' module has a main().
-
-        # We'll use the class-based approach if available or just invoke the function.
-        # Checking NVFlare 2.7 source (conceptual):
-        # app = ClientTrain(...)
-        # app.run()
-
-        # For this atomic unit, let's mock the actual start to not block the process,
-        # but in production this would be:
-        # client_train.main()
-
-        # Since we can't easily run a full FL client in this environment without a server,
-        # we will assume the integration is correct if we can parse args and reach the point of start.
-
-        pass
+            # We must manipulate sys.argv because client_train.parse_arguments() reads it directly.
+            sys_argv_backup = sys.argv
+            try:
+                sys.argv = nvflare_argv
+                # Parse args using NVFlare's parser
+                fl_args = client_train.parse_arguments()
+                # Run main logic with parsed args
+                client_train.main(fl_args)
+            finally:
+                sys.argv = sys_argv_backup
+        else:
+            logger.warning("NVFlare ClientTrain module not found. Skipping execution (Dry Run).")
 
     except Exception as e:
-        # If it's the security check failing, logger already handled it, just ensure we exit 1
-        # If it's argparse error (e.g. required args), it calls sys.exit(2)
         logger.exception(f"Failed to start Enclave Agent: {e}")
         sys.exit(1)
-    finally:
-        # Restore sys.argv
-        if "sys_argv_backup" in locals():
-            sys.argv = sys_argv_backup
 
 
 if __name__ == "__main__":  # pragma: no cover
