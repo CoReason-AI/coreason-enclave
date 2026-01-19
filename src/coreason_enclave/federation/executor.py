@@ -10,6 +10,7 @@
 
 import json
 import sys
+from typing import Dict, Optional, Tuple
 from unittest.mock import MagicMock
 
 # NVFlare 2.7.1 has an issue on Windows where it imports 'resource' (Unix-only).
@@ -26,6 +27,7 @@ from nvflare.apis.executor import Executor
 from nvflare.apis.fl_context import FLContext
 from nvflare.apis.shareable import ReturnCode, Shareable, make_reply
 from nvflare.apis.signal import Signal
+from torch.utils.data import DataLoader
 
 from coreason_enclave.data.loader import DataLoaderFactory
 from coreason_enclave.hardware.factory import get_attestation_provider
@@ -34,6 +36,9 @@ from coreason_enclave.privacy import PrivacyBudgetExceededError, PrivacyGuard
 from coreason_enclave.schemas import AggregationStrategy, FederationJob
 from coreason_enclave.sentry import DataSentry, FileExistenceValidator
 from coreason_enclave.utils.logger import logger
+
+# Default Learning Rate for the optimizer
+DEFAULT_LR = 0.01
 
 
 class CoreasonExecutor(Executor):  # type: ignore[misc]
@@ -103,38 +108,27 @@ class CoreasonExecutor(Executor):  # type: ignore[misc]
         Verify that the environment is trusted.
 
         Raises:
-            SecurityError: If attestation fails or status is not TRUSTED.
+            RuntimeError: If attestation fails or status is not TRUSTED.
         """
         report = self.attestation_provider.attest()
         if report.status != "TRUSTED":
             raise RuntimeError(f"Untrusted environment: {report.status}")
         logger.info(f"Environment attested: {report.hardware_type} ({report.status})")
 
-    def _execute_training(
-        self,
-        shareable: Shareable,
-        fl_ctx: FLContext,
-        abort_signal: Signal,
-    ) -> Shareable:
+    def _parse_job_config(self, shareable: Shareable) -> Optional[FederationJob]:
         """
-        Execute the training loop.
+        Parse and validate the FederationJob configuration from shareable.
 
         Args:
-            shareable: Input data.
-            fl_ctx: Context.
-            abort_signal: Abort signal.
+            shareable: The input data containing the job configuration.
 
         Returns:
-            Shareable: Training result.
+            FederationJob: Validated configuration object, or None if parsing failed.
         """
-        # 1. Check Hardware Trust
-        self._check_hardware_trust()
-
-        # 2. Parse Config
         job_config_raw = shareable.get_header("job_config")
         if not job_config_raw:
             logger.error("Missing job_config in shareable header")
-            return make_reply(ReturnCode.BAD_TASK_DATA)
+            return None
 
         try:
             # If it's a JSON string, parse it. If it's already a dict, use it.
@@ -143,98 +137,120 @@ class CoreasonExecutor(Executor):  # type: ignore[misc]
             else:
                 job_config_dict = job_config_raw
 
-            job_config = FederationJob(**job_config_dict)
+            return FederationJob(**job_config_dict)
         except Exception as e:
             logger.error(f"Invalid job_config: {e}")
-            return make_reply(ReturnCode.BAD_TASK_DATA)
+            return None
 
-        # 3. Load Data & Model
-        try:
-            dataset_id = job_config.dataset_id
-            model_arch = job_config.model_arch
+    def _load_and_capture_params(
+        self, model: torch.nn.Module, shareable: Shareable, job_config: FederationJob
+    ) -> Optional[Dict[str, torch.Tensor]]:
+        """
+        Load incoming parameters into the model and optionally capture them as global parameters.
 
-            # Load Data
-            train_loader = self.data_loader_factory.get_loader(dataset_id, batch_size=32)
+        Args:
+            model: The PyTorch model to update.
+            shareable: The input shareable containing 'params'.
+            job_config: The job configuration.
 
-            # Load Model from Registry
-            model_cls = ModelRegistry.get(model_arch)
-            # Assumption: Model can be instantiated with default args or we need hyperparameters in config
-            # For simplicity, assuming default args or handled by model internal logic
-            model = model_cls()
+        Returns:
+            Optional[Dict[str, torch.Tensor]]: Global parameters for FedProx, or None.
+        """
+        incoming_params = shareable.get("params")
+        global_params: Optional[Dict[str, torch.Tensor]] = None
 
-            # Load incoming weights if any
-            incoming_params = shareable.get("params")
-            global_params = None
-            if incoming_params:
-                # Load weights into model
-                # Assuming incoming_params is a dict compatible with state_dict
-                try:
-                    # Convert list/numpy to tensor if needed
-                    state_dict = {
-                        k: torch.tensor(v) if not isinstance(v, torch.Tensor) else v for k, v in incoming_params.items()
-                    }
-                    model.load_state_dict(state_dict)
-                    logger.info("Loaded incoming params into model")
+        if incoming_params:
+            try:
+                # Convert list/numpy to tensor if needed
+                state_dict = {
+                    k: torch.tensor(v) if not isinstance(v, torch.Tensor) else v for k, v in incoming_params.items()
+                }
+                model.load_state_dict(state_dict)
+                logger.info("Loaded incoming params into model")
 
-                    # Keep a copy of global params for FedProx
-                    if job_config.strategy == AggregationStrategy.FED_PROX:
-                        logger.info("FedProx enabled. Capturing global params.")
-                        global_params = {k: v.clone().detach() for k, v in model.named_parameters() if v.requires_grad}
-                except Exception as e:
-                    logger.warning(f"Failed to load incoming params: {e}")
-                    # In some cases we might want to fail hard, but for robust initialization we log
-                    # However, for FedProx without global params, it degenerates to FedAvg or fails.
+                # Keep a copy of global params for FedProx
+                if job_config.strategy == AggregationStrategy.FED_PROX:
+                    logger.info("FedProx enabled. Capturing global params.")
+                    global_params = {k: v.clone().detach() for k, v in model.named_parameters() if v.requires_grad}
+            except Exception as e:
+                logger.warning(f"Failed to load incoming params: {e}")
+                # We log warning but proceed, assuming robust initialization or fallback logic
 
-        except Exception as e:  # pragma: no cover
-            logger.error(f"Data/Model loading failed: {e}")
-            return make_reply(ReturnCode.EXECUTION_EXCEPTION)
+        return global_params
 
-        # 4. Initialize Privacy & Optimizer
-        try:
-            optimizer = optim.SGD(model.parameters(), lr=0.01)
-            privacy_guard = PrivacyGuard(config=job_config.privacy)
+    def _calculate_proximal_loss(
+        self,
+        model: torch.nn.Module,
+        global_params: Dict[str, torch.Tensor],
+        mu: float,
+    ) -> torch.Tensor:
+        """
+        Calculate the FedProx proximal term: (mu / 2) * ||w - w_global||^2.
 
-            # Attach Privacy Engine
-            model, optimizer, train_loader = privacy_guard.attach(model, optimizer, train_loader)
-        except Exception as e:
-            logger.error(f"Privacy/Optimizer initialization failed: {e}")
-            return make_reply(ReturnCode.EXECUTION_EXCEPTION)
+        Args:
+            model: The current model.
+            global_params: The global parameters (snapshot).
+            mu: The proximal coefficient.
 
-        logger.info(f"Starting training execution for {job_config.rounds} rounds (local epochs)...")
+        Returns:
+            torch.Tensor: The scalar proximal loss term.
+        """
+        proximal_term = torch.tensor(0.0, device=next(model.parameters()).device)
+        for name, param in model.named_parameters():
+            if not param.requires_grad:
+                continue
 
-        # 5. Training Loop
+            # Opacus wraps model, adding _module. prefix
+            clean_name = name.replace("_module.", "")
+            if clean_name in global_params:
+                proximal_term += (param - global_params[clean_name]).norm(2) ** 2
+
+        return (mu / 2.0) * proximal_term
+
+    def _run_training_loop(
+        self,
+        model: torch.nn.Module,
+        train_loader: DataLoader,
+        optimizer: optim.Optimizer,
+        privacy_guard: PrivacyGuard,
+        job_config: FederationJob,
+        global_params: Optional[Dict[str, torch.Tensor]],
+        abort_signal: Signal,
+    ) -> Optional[Tuple[float, float]]:
+        """
+        Execute the main training loop.
+
+        Args:
+            model: The model.
+            train_loader: Data loader.
+            optimizer: Optimizer.
+            privacy_guard: Privacy guard.
+            job_config: Configuration.
+            global_params: Global parameters for FedProx.
+            abort_signal: Signal.
+
+        Returns:
+            Optional[Tuple[float, float]]: (average_loss, current_epsilon) or None if aborted/failed.
+        """
         model.train()
         total_loss = 0.0
         num_batches = 0
-
-        # We interpret 'rounds' in FederationJob as local epochs for this iteration
-        epochs = 1  # Usually FL runs 1-5 local epochs per global round.
-        # But wait, FederationJob.rounds usually means GLOBAL rounds.
-        # The client just trains for `epochs` per task execution.
-        # Let's assume 1 local epoch per task execution for now, or configurable.
+        epochs = 1  # Local epochs per task execution
 
         try:
             for _epoch in range(epochs):
                 for _batch_idx, (data, target) in enumerate(train_loader):
-                    # Check abort signal
                     if abort_signal.triggered:
                         logger.info("Abort signal triggered. Stopping.")
-                        return Shareable()
+                        return None
 
                     optimizer.zero_grad()
                     output = model(data)
                     loss = torch.nn.functional.mse_loss(output, target)
 
                     # FedProx Logic
-                    if job_config.strategy == AggregationStrategy.FED_PROX and global_params:
-                        proximal_term = 0.0
-                        for name, param in model.named_parameters():
-                            # Opacus wraps model, adding _module. prefix
-                            clean_name = name.replace("_module.", "")
-                            if param.requires_grad and clean_name in global_params:
-                                proximal_term += (param - global_params[clean_name]).norm(2) ** 2
-
-                        loss += (job_config.proximal_mu / 2.0) * proximal_term
+                    if job_config.strategy == AggregationStrategy.FED_PROX and global_params is not None:
+                        loss += self._calculate_proximal_loss(model, global_params, job_config.proximal_mu)
 
                     loss.backward()
                     optimizer.step()
@@ -247,24 +263,86 @@ class CoreasonExecutor(Executor):  # type: ignore[misc]
                         privacy_guard.check_budget()
                     except PrivacyBudgetExceededError:
                         logger.critical("Privacy budget exceeded during training. Aborting.")
-                        return make_reply(ReturnCode.EXECUTION_EXCEPTION)
+                        # Returning None signals failure to the caller
+                        # (Caller should ideally map this to EXECUTION_EXCEPTION)
+                        # But wait, we need to propagate this specific error?
+                        # The original code caught it and returned EXECUTION_EXCEPTION.
+                        raise
 
-        except Exception as e:  # pragma: no cover
+            avg_loss = total_loss / max(1, num_batches)
+            epsilon = privacy_guard.get_current_epsilon()
+            return avg_loss, epsilon
+
+        except Exception as e:
+            # Let caller handle exceptions
+            raise e
+
+    def _execute_training(
+        self,
+        shareable: Shareable,
+        fl_ctx: FLContext,
+        abort_signal: Signal,
+    ) -> Shareable:
+        """
+        Orchestrate the training workflow.
+        Refactored to compose smaller methods.
+        """
+        # 1. Check Hardware Trust
+        self._check_hardware_trust()
+
+        # 2. Parse Config
+        job_config = self._parse_job_config(shareable)
+        if not job_config:
+            return make_reply(ReturnCode.BAD_TASK_DATA)
+
+        # 3. Load Resources & Initialize
+        try:
+            dataset_id = job_config.dataset_id
+            model_arch = job_config.model_arch
+
+            # Data
+            train_loader = self.data_loader_factory.get_loader(dataset_id, batch_size=32)
+
+            # Model
+            model_cls = ModelRegistry.get(model_arch)
+            model = model_cls()
+
+            # Params (FedProx capture happens here)
+            global_params = self._load_and_capture_params(model, shareable, job_config)
+
+            # Privacy & Optimizer
+            optimizer = optim.SGD(model.parameters(), lr=DEFAULT_LR)
+            privacy_guard = PrivacyGuard(config=job_config.privacy)
+            model, optimizer, train_loader = privacy_guard.attach(model, optimizer, train_loader)
+
+        except Exception as e:
+            logger.error(f"Initialization failed: {e}")
+            return make_reply(ReturnCode.EXECUTION_EXCEPTION)
+
+        logger.info(f"Starting training execution for {job_config.rounds} rounds (local epochs)...")
+
+        # 4. Run Training Loop
+        try:
+            result = self._run_training_loop(
+                model, train_loader, optimizer, privacy_guard, job_config, global_params, abort_signal
+            )
+
+            if result is None:
+                # Aborted manually inside loop
+                return Shareable()
+
+            avg_loss, epsilon = result
+
+        except Exception as e:
             logger.exception(f"Training loop failed: {e}")
             return make_reply(ReturnCode.EXECUTION_EXCEPTION)
 
-        # 6. Sanitize Output
-        # Convert model state_dict to dict
-        # Note: Opacus wraps the model, so we might need model._module if accessing original attributes,
-        # but state_dict() handles it.
-        # However, Opacus adds '_module.' prefix? Check Opacus docs.
-        # Usually it's fine.
-
+        # 5. Sanitize Output
         outgoing_params = {k: v.cpu().numpy().tolist() for k, v in model.state_dict().items()}
 
         training_result = {
             "params": outgoing_params,
-            "metrics": {"loss": total_loss / max(1, num_batches), "epsilon": privacy_guard.get_current_epsilon()},
+            "metrics": {"loss": avg_loss, "epsilon": epsilon},
             "meta": {"dataset_id": dataset_id, "model": model_arch},
         }
 
@@ -274,7 +352,7 @@ class CoreasonExecutor(Executor):  # type: ignore[misc]
             logger.error(f"Output sanitation failed: {e}")
             return make_reply(ReturnCode.EXECUTION_EXCEPTION)
 
-        # 7. Return Result
+        # 6. Return Result
         result_shareable = Shareable()
         result_shareable.update(sanitized_result)
         return result_shareable

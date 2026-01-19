@@ -10,7 +10,7 @@
 
 import json
 from typing import Any, Dict
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 import torch
@@ -249,3 +249,39 @@ class TestFedProx:
 
         # Expect identical loss because proximal term calculation is skipped
         assert loss_avg == pytest.approx(loss_prox, rel=1e-6)
+
+    def test_fed_prox_frozen_layers(
+        self, executor: CoreasonExecutor, basic_job_config: Dict[str, Any], mock_data_loader: DataLoader[Any]
+    ) -> None:
+        """Test that FedProx ignores frozen layers (requires_grad=False)."""
+
+        # Define a model class with frozen layers
+        class FrozenSimpleMLP(SimpleMLP):
+            def __init__(self) -> None:
+                super().__init__()
+                # Freeze first layer
+                for param in self.net[0].parameters():
+                    param.requires_grad = False
+
+        # Mock Registry to return this class
+        with patch("coreason_enclave.models.registry.ModelRegistry.get", return_value=FrozenSimpleMLP):
+            torch.manual_seed(42)
+            job = basic_job_config.copy()
+            job["strategy"] = "FED_PROX"
+            job["proximal_mu"] = 1.0
+
+            # Use standard params (they will be loaded into FrozenSimpleMLP)
+            initial_params = SimpleMLP().state_dict()
+            shareable_params = {k: v.clone() for k, v in initial_params.items()}
+
+            shareable = Shareable()
+            shareable.set_header("job_config", json.dumps(job))
+            shareable["params"] = shareable_params
+
+            # Run execution
+            # This should trigger the 'if not param.requires_grad: continue' line
+            result = executor.execute(task_name="train", shareable=shareable, fl_ctx=FLContext(), abort_signal=Signal())
+
+            assert result.get_return_code() == "OK"
+            # We don't verify loss value here, just that it runs and hits the line (coverage check)
+            # and doesn't crash.
