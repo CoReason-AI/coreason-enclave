@@ -63,7 +63,15 @@ class FederationJob(BaseModel):
     dataset_id: str = Field(..., description="Identifier/path for the training dataset")
     model_arch: str = Field(..., description="ID of the model architecture in the Registry")
     strategy: AggregationStrategy
+    proximal_mu: float = Field(0.01, description="Proximal term coefficient for FedProx")
     privacy: PrivacyConfig
+
+    @field_validator("proximal_mu")
+    @classmethod
+    def validate_proximal_mu(cls, v: float) -> float:
+        if v < 0:
+            raise ValueError("proximal_mu must be non-negative")
+        return v
 
     @field_validator("dataset_id")
     @classmethod
