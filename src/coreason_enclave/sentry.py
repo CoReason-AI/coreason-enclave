@@ -36,8 +36,8 @@ class ValidatorProtocol(Protocol):
         Validate the data at the given path against the provided schema.
 
         Args:
-            data_path: Path to the data file or directory.
-            schema: The schema definition (format depends on implementation).
+            data_path (str): Path to the data file or directory.
+            schema (Any): The schema definition (format depends on implementation).
 
         Returns:
             bool: True if valid, False otherwise.
@@ -60,8 +60,8 @@ class FileExistenceValidator:
         Schema is ignored for this basic validation.
 
         Args:
-            data_path: Path to the file.
-            schema: Ignored.
+            data_path (str): Path to the file.
+            schema (Any): Ignored.
 
         Returns:
             bool: True if file exists, False otherwise.
@@ -93,7 +93,7 @@ class DataSentry:
         Initialize the DataSentry.
 
         Args:
-            validator: An implementation of ValidatorProtocol.
+            validator (ValidatorProtocol): An implementation of ValidatorProtocol.
         """
         self.validator = validator
         self.allowed_output_keys = {"params", "metrics", "meta", "scaffold_updates"}
@@ -108,8 +108,8 @@ class DataSentry:
         Enforces path security (preventing traversal) and delegates content validation.
 
         Args:
-            dataset_id: The identifier of the dataset (relative to COREASON_DATA_ROOT).
-            schema: The expected schema of the data.
+            dataset_id (str): The identifier of the dataset (relative to COREASON_DATA_ROOT).
+            schema (Any): The expected schema of the data.
 
         Returns:
             bool: True if validation passes.
@@ -164,7 +164,7 @@ class DataSentry:
         Performs recursive inspection to prevent nested data leakage (e.g. PII in metadata).
 
         Args:
-            payload: The dictionary to be sent out of the enclave.
+            payload (Dict[str, Any]): The dictionary to be sent out of the enclave.
 
         Returns:
             Dict[str, Any]: The sanitized payload.

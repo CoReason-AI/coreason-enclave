@@ -37,7 +37,7 @@ class DataLoaderFactory:
         Initialize the DataLoaderFactory.
 
         Args:
-            sentry: The DataSentry instance for validation.
+            sentry (DataSentry): The DataSentry instance for validation.
         """
         self.sentry = sentry
 
@@ -46,8 +46,8 @@ class DataLoaderFactory:
         Load data and return a PyTorch DataLoader.
 
         Args:
-            dataset_id: The ID of the dataset (e.g. "data.csv").
-            batch_size: Batch size for training.
+            dataset_id (str): The ID of the dataset (e.g. "data.csv").
+            batch_size (int): Batch size for training.
 
         Returns:
             DataLoader: The PyTorch DataLoader.
