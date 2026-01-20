@@ -27,7 +27,7 @@ from coreason_enclave.schemas import AttestationReport
 class TestComplexScenarios:
     @pytest.fixture
     def mock_attestation_provider(self) -> Generator[MagicMock, None, None]:
-        with patch("coreason_enclave.federation.executor.get_attestation_provider") as mock_get:
+        with patch("coreason_enclave.services.get_attestation_provider") as mock_get:
             provider = MagicMock()
             mock_get.return_value = provider
             provider.attest.return_value = AttestationReport(
@@ -40,8 +40,21 @@ class TestComplexScenarios:
             yield provider
 
     @pytest.fixture
-    def executor(self, mock_attestation_provider: MagicMock) -> CoreasonExecutor:
-        return CoreasonExecutor(training_task_name="train_task")
+    def executor(self, mock_attestation_provider: MagicMock) -> Generator[CoreasonExecutor, None, None]:
+        # Patch DataLoaderFactory to prevent file access
+        with patch("coreason_enclave.services.DataLoaderFactory") as MockFactory:
+            factory = MockFactory.return_value
+            # Default behavior: return dummy loader
+            dataset = TensorDataset(torch.randn(10, 10), torch.randn(10, 1))
+            factory.get_loader.return_value = DataLoader(dataset, batch_size=2)
+
+            # Need to mock DataSentry too if used
+            with patch("coreason_enclave.services.DataSentry") as MockSentry:
+                sentry = MockSentry.return_value
+                sentry.validate_input.return_value = True
+                sentry.sanitize_output.return_value = {"params": {}}
+
+                yield CoreasonExecutor(training_task_name="train_task")
 
     @pytest.fixture
     def mock_fl_ctx(self) -> MagicMock:
@@ -86,12 +99,12 @@ class TestComplexScenarios:
         executor.sentry.sanitize_output.return_value = {}
 
         # Mock Loader with mismatched dimensions
-        executor.data_loader_factory = MagicMock()
+        executor.service._async.data_loader_factory = MagicMock()
         X = torch.randn(10, 5)  # 5 features
         y = torch.randn(10, 1)
         dataset = TensorDataset(X, y)
         loader = DataLoader(dataset, batch_size=2)
-        executor.data_loader_factory.get_loader.return_value = loader
+        executor.service._async.data_loader_factory.get_loader.return_value = loader
 
         result = executor.execute("train_task", shareable, mock_fl_ctx, mock_signal)
 
@@ -154,8 +167,8 @@ class TestComplexScenarios:
 
         aborting_loader = AbortingLoader(real_loader, mock_signal)
 
-        executor.data_loader_factory = MagicMock()
-        executor.data_loader_factory.get_loader.return_value = aborting_loader
+        executor.service._async.data_loader_factory = MagicMock()
+        executor.service._async.data_loader_factory.get_loader.return_value = aborting_loader
 
         result = executor.execute("train_task", shareable, mock_fl_ctx, mock_signal)
 
@@ -187,13 +200,13 @@ class TestComplexScenarios:
         executor.sentry.validate_input.return_value = True
         executor.sentry.sanitize_output.return_value = {"params": []}  # Mock sanitation
 
-        executor.data_loader_factory = MagicMock()
+        executor.service._async.data_loader_factory = MagicMock()
         X = torch.randn(10, 10)
         X[0, 0] = float("nan")  # Inject NaN
         y = torch.randn(10, 1)
         dataset = TensorDataset(X, y)
         loader = DataLoader(dataset, batch_size=2)
-        executor.data_loader_factory.get_loader.return_value = loader
+        executor.service._async.data_loader_factory.get_loader.return_value = loader
 
         result = executor.execute("train_task", shareable, mock_fl_ctx, mock_signal)
 
