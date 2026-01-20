@@ -72,8 +72,8 @@ class CoreasonExecutor(Executor):  # type: ignore[misc]
         Initialize the CoreasonExecutor.
 
         Args:
-            training_task_name: The name of the training task to listen for.
-            aggregation_task_name: The name of the aggregation task.
+            training_task_name (str): The name of the training task to listen for.
+            aggregation_task_name (str): The name of the aggregation task.
         """
         super().__init__()
         self.training_task_name = training_task_name
@@ -103,10 +103,10 @@ class CoreasonExecutor(Executor):  # type: ignore[misc]
         Execute a task assigned by the server.
 
         Args:
-            task_name: The name of the task.
-            shareable: The data provided by the server (e.g., model weights).
-            fl_ctx: The federation context.
-            abort_signal: Signal to check for abortion.
+            task_name (str): The name of the task.
+            shareable (Shareable): The data provided by the server (e.g., model weights).
+            fl_ctx (FLContext): The federation context.
+            abort_signal (Signal): Signal to check for abortion.
 
         Returns:
             Shareable: The result of the execution (e.g., updated weights).
@@ -142,10 +142,10 @@ class CoreasonExecutor(Executor):  # type: ignore[misc]
         Parse and validate the FederationJob configuration from shareable.
 
         Args:
-            shareable: The input data containing the job configuration.
+            shareable (Shareable): The input data containing the job configuration.
 
         Returns:
-            FederationJob: Validated configuration object, or None if parsing failed.
+            Optional[FederationJob]: Validated configuration object, or None if parsing failed.
         """
         job_config_raw = shareable.get_header("job_config")
         if not job_config_raw:
@@ -169,7 +169,7 @@ class CoreasonExecutor(Executor):  # type: ignore[misc]
         Factory method to get the training strategy.
 
         Args:
-            job_config: The federation job configuration.
+            job_config (FederationJob): The federation job configuration.
 
         Returns:
             TrainingStrategy: The instantiated strategy (FedAvg, FedProx, or SCAFFOLD).
@@ -196,12 +196,12 @@ class CoreasonExecutor(Executor):  # type: ignore[misc]
         Execute the main training loop.
 
         Args:
-            model: The model.
-            train_loader: Data loader.
-            optimizer: Optimizer.
-            privacy_guard: Privacy guard.
-            strategy: The active training strategy.
-            abort_signal: Signal.
+            model (torch.nn.Module): The model.
+            train_loader (DataLoader): Data loader.
+            optimizer (optim.Optimizer): Optimizer.
+            privacy_guard (PrivacyGuard): Privacy guard.
+            strategy (TrainingStrategy): The active training strategy.
+            abort_signal (Signal): Signal.
 
         Returns:
             Optional[Tuple[float, float, int]]: (avg_loss, epsilon, total_steps) or None if aborted.

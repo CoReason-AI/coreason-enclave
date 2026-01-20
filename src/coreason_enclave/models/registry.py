@@ -37,7 +37,7 @@ class ModelRegistry:
         Decorator to register a model class.
 
         Args:
-            name: The ID to register the model under.
+            name (str): The ID to register the model under.
         """
 
         def decorator(model_cls: Type[nn.Module]) -> Type[nn.Module]:
@@ -55,7 +55,7 @@ class ModelRegistry:
         Get a model class by name.
 
         Args:
-            name: The model ID.
+            name (str): The model ID.
 
         Returns:
             Type[nn.Module]: The model class.
