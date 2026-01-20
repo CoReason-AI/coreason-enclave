@@ -8,6 +8,13 @@
 #
 # Source Code: https://github.com/CoReason-AI/coreason_enclave
 
+"""
+Simulation Hardware Attestation.
+
+Implementation of AttestationProvider for development and testing environments
+where real TEE hardware is unavailable.
+"""
+
 import hashlib
 from uuid import uuid4
 
@@ -19,7 +26,9 @@ from coreason_enclave.utils.logger import logger
 class SimulationAttestationProvider(AttestationProvider):
     """
     Simulation provider for development and testing.
+
     Generates dummy attestation reports without requiring TEE hardware.
+    WARNING: DO NOT USE IN PRODUCTION.
     """
 
     def attest(self) -> AttestationReport:

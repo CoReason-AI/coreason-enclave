@@ -8,6 +8,14 @@
 #
 # Source Code: https://github.com/CoReason-AI/coreason_enclave
 
+"""
+The Data Sentry: Firewall and Airlock for the Enclave.
+
+Responsible for:
+1. Validating input data before it enters the training loop.
+2. Sanitizing output data to prevent leakage (the "Airlock").
+"""
+
 import os
 from pathlib import Path
 from typing import Any, Dict, Protocol, runtime_checkable
@@ -19,6 +27,7 @@ from coreason_enclave.utils.logger import logger
 class ValidatorProtocol(Protocol):
     """
     Protocol for external data validators (e.g., coreason-validator).
+
     Decouples the enclave from specific validation implementations.
     """
 
@@ -27,8 +36,8 @@ class ValidatorProtocol(Protocol):
         Validate the data at the given path against the provided schema.
 
         Args:
-            data_path: Path to the data file or directory.
-            schema: The schema definition (format depends on implementation).
+            data_path (str): Path to the data file or directory.
+            schema (Any): The schema definition (format depends on implementation).
 
         Returns:
             bool: True if valid, False otherwise.
@@ -49,6 +58,13 @@ class FileExistenceValidator:
         """
         Validate that the file exists at the given path.
         Schema is ignored for this basic validation.
+
+        Args:
+            data_path (str): Path to the file.
+            schema (Any): Ignored.
+
+        Returns:
+            bool: True if file exists, False otherwise.
         """
         path = Path(data_path)
         if not path.exists():
@@ -67,7 +83,9 @@ class DataLeakageError(Exception):
 class DataSentry:
     """
     The Firewall / Airlock for the Enclave.
-    Responsible for input validation and output sanitation.
+
+    Responsible for input validation (preventing path traversal and invalid data)
+    and output sanitation (ensuring only allowed keys and non-sensitive data exit the enclave).
     """
 
     def __init__(self, validator: ValidatorProtocol) -> None:
@@ -75,10 +93,10 @@ class DataSentry:
         Initialize the DataSentry.
 
         Args:
-            validator: An implementation of ValidatorProtocol.
+            validator (ValidatorProtocol): An implementation of ValidatorProtocol.
         """
         self.validator = validator
-        self.allowed_output_keys = {"params", "metrics", "meta"}
+        self.allowed_output_keys = {"params", "metrics", "meta", "scaffold_updates"}
         # Blocklist for sensitive keys that should NEVER appear, even nested.
         self.sensitive_keys = {"private_key", "secret", "patient_id", "raw_data", "pii"}
         logger.info("DataSentry initialized.")
@@ -87,9 +105,11 @@ class DataSentry:
         """
         Validate input data before it is used for training.
 
+        Enforces path security (preventing traversal) and delegates content validation.
+
         Args:
-            dataset_id: The identifier of the dataset (relative to COREASON_DATA_ROOT).
-            schema: The expected schema of the data.
+            dataset_id (str): The identifier of the dataset (relative to COREASON_DATA_ROOT).
+            schema (Any): The expected schema of the data.
 
         Returns:
             bool: True if validation passes.
@@ -139,11 +159,12 @@ class DataSentry:
     def sanitize_output(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """
         Sanitize the output payload ("Airlock").
+
         Ensures only allowed keys and types exit the enclave.
-        Performs recursive checking to prevent nested data leakage.
+        Performs recursive inspection to prevent nested data leakage (e.g. PII in metadata).
 
         Args:
-            payload: The dictionary to be sent out of the enclave.
+            payload (Dict[str, Any]): The dictionary to be sent out of the enclave.
 
         Returns:
             Dict[str, Any]: The sanitized payload.
