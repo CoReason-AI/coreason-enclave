@@ -8,6 +8,13 @@
 #
 # Source Code: https://github.com/CoReason-AI/coreason_enclave
 
+"""
+Real Hardware Attestation.
+
+Implementation of AttestationProvider that interacts with real TEE hardware (SGX/TDX/SEV)
+to generate cryptographic quotes.
+"""
+
 import hashlib
 import os
 import uuid
@@ -20,12 +27,15 @@ from coreason_enclave.utils.logger import logger
 class RealAttestationProvider(AttestationProvider):
     """
     Real hardware attestation provider.
+
     Interacts with TEE drivers (e.g., /dev/sgx, /dev/sev) to generate quotes.
     """
 
     def attest(self) -> AttestationReport:
         """
         Generate a real attestation report.
+
+        Verifies access to TEE devices and generates a quote.
 
         Returns:
             AttestationReport: The report from the hardware.

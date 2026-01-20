@@ -8,6 +8,13 @@
 #
 # Source Code: https://github.com/CoReason-AI/coreason_enclave
 
+"""
+Hardware Factory.
+
+Provides the factory method to instantiate the correct AttestationProvider
+based on the execution environment (Simulation vs. Real Hardware).
+"""
+
 import os
 
 from coreason_enclave.hardware.interfaces import AttestationProvider
@@ -19,7 +26,10 @@ from coreason_enclave.utils.logger import logger
 def get_attestation_provider() -> AttestationProvider:
     """
     Factory to return the appropriate AttestationProvider.
+
     Controlled by 'COREASON_ENCLAVE_SIMULATION' environment variable.
+    If 'true', returns a simulation provider (for dev/test).
+    Otherwise, returns the real hardware provider (requires TEE).
 
     Returns:
         AttestationProvider: An instance of SimulationAttestationProvider or RealAttestationProvider.

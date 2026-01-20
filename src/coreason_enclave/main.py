@@ -8,6 +8,13 @@
 #
 # Source Code: https://github.com/CoReason-AI/coreason_enclave
 
+"""
+Entry point for the Coreason Enclave Agent.
+
+This module bootstraps the NVFlare client, enforces security policies (hardware attestation vs. simulation),
+and acts as the "Secure Compute Wrapper" for the training process.
+"""
+
 import argparse
 import os
 import sys
@@ -36,14 +43,16 @@ from coreason_enclave.utils.logger import logger
 def apply_security_policy(simulation_flag: bool, insecure_flag: bool) -> None:
     """
     Configure the security mode for the Enclave Agent.
+
     Strictly enforces the presence of the --insecure or --simulation flag for simulation mode.
+    This ensures that production workloads cannot accidentally run in an untrusted environment.
 
     Args:
         simulation_flag: True if --simulation was passed in CLI.
         insecure_flag: True if --insecure was passed in CLI.
 
     Raises:
-        RuntimeError: If simulation mode is requested via environment but flag is missing.
+        RuntimeError: If simulation mode is requested via environment but the required CLI flag is missing.
     """
     env_simulation = os.environ.get("COREASON_ENCLAVE_SIMULATION", "false").lower() == "true"
     requested_simulation = simulation_flag or insecure_flag
@@ -72,6 +81,8 @@ def apply_security_policy(simulation_flag: bool, insecure_flag: bool) -> None:
 def _build_nvflare_args(parsed_args: argparse.Namespace) -> List[str]:
     """
     Construct the argument list for NVFlare ClientTrain.
+
+    Translates coreason-enclave arguments to the format expected by NVFlare.
 
     Args:
         parsed_args: The arguments parsed by coreason-enclave.
@@ -108,7 +119,15 @@ def _build_nvflare_args(parsed_args: argparse.Namespace) -> List[str]:
 def main(args: Optional[list[str]] = None) -> None:
     """
     Entry point for the Coreason Enclave Agent.
+
     Wraps NVFlare's ClientTrain to start the federation client.
+    It performs the following steps:
+    1. Validates security flags (Simulation vs. TEE).
+    2. Translates arguments for NVFlare.
+    3. Invokes the NVFlare client process.
+
+    Args:
+        args: Command line arguments. Defaults to sys.argv[1:].
     """
     logger.info("Starting Coreason Enclave Agent...")
 
