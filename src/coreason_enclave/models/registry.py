@@ -8,6 +8,13 @@
 #
 # Source Code: https://github.com/CoReason-AI/coreason_enclave
 
+"""
+Model Registry.
+
+Allows dynamic, safe instantiation of torch.nn.Module classes using string identifiers.
+This prevents arbitrary code execution vulnerabilities associated with pickling or `eval()`.
+"""
+
 from typing import Callable, Type
 
 from torch import nn
@@ -18,6 +25,7 @@ from coreason_enclave.utils.logger import logger
 class ModelRegistry:
     """
     Registry for machine learning models.
+
     Allows dynamic instantiation of models by string ID (safe code loading).
     """
 

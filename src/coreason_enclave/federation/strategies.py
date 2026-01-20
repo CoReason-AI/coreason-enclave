@@ -8,6 +8,13 @@
 #
 # Source Code: https://github.com/CoReason-AI/coreason_enclave
 
+"""
+Federated Learning Strategies.
+
+Implements the logic for different aggregation strategies (FedAvg, FedProx, SCAFFOLD).
+These strategies hook into the training loop to apply corrections or updates.
+"""
+
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Optional
 
@@ -23,22 +30,58 @@ class TrainingStrategy(ABC):
 
     @abstractmethod
     def before_training(self, model: torch.nn.Module, shareable: Shareable, job_config: FederationJob) -> None:
-        """Called before the training loop starts."""
+        """
+        Called before the training loop starts.
+
+        Use this to capture global state (e.g., global model weights) or initialize
+        strategy-specific variables.
+
+        Args:
+            model: The local model (already loaded with global weights).
+            shareable: The data received from the server.
+            job_config: The federation job configuration.
+        """
         pass  # pragma: no cover
 
     @abstractmethod
     def calculate_loss_correction(self, model: torch.nn.Module) -> torch.Tensor:
-        """Calculate any additional loss term (e.g., FedProx proximal term)."""
+        """
+        Calculate any additional loss term (e.g., FedProx proximal term).
+
+        Args:
+            model: The current model.
+
+        Returns:
+            torch.Tensor: The additional loss to add to the objective.
+        """
         pass  # pragma: no cover
 
     @abstractmethod
     def after_optimizer_step(self, model: torch.nn.Module, lr: float) -> None:
-        """Called after optimizer.step() (e.g., for SCAFFOLD correction)."""
+        """
+        Called after optimizer.step().
+
+        Used for strategies that need to apply corrections directly to weights (e.g. SCAFFOLD).
+
+        Args:
+            model: The model.
+            lr: The learning rate.
+        """
         pass  # pragma: no cover
 
     @abstractmethod
     def after_training(self, model: torch.nn.Module, lr: float, steps: int) -> Dict[str, Any]:
-        """Called after training completes. Returns any additional metrics or updates."""
+        """
+        Called after training completes.
+
+        Args:
+            model: The trained model.
+            lr: The learning rate.
+            steps: Total training steps taken.
+
+        Returns:
+            Dict[str, Any]: Additional metrics or updates to send back to the server.
+        """
         pass  # pragma: no cover
 
 
@@ -46,15 +89,19 @@ class FedAvgStrategy(TrainingStrategy):
     """Standard Federated Averaging (FedAvg). No special corrections."""
 
     def before_training(self, model: torch.nn.Module, shareable: Shareable, job_config: FederationJob) -> None:
+        """No-op for FedAvg."""
         pass
 
     def calculate_loss_correction(self, model: torch.nn.Module) -> torch.Tensor:
+        """No loss correction for FedAvg."""
         return torch.tensor(0.0, device=next(model.parameters()).device)
 
     def after_optimizer_step(self, model: torch.nn.Module, lr: float) -> None:
+        """No-op for FedAvg."""
         pass
 
     def after_training(self, model: torch.nn.Module, lr: float, steps: int) -> Dict[str, Any]:
+        """No extra metrics for FedAvg."""
         return {}
 
 
@@ -66,6 +113,7 @@ class FedProxStrategy(TrainingStrategy):
         self.mu: float = 0.0
 
     def before_training(self, model: torch.nn.Module, shareable: Shareable, job_config: FederationJob) -> None:
+        """Capture global parameters for the proximal term calculation."""
         self.mu = job_config.proximal_mu
 
         # Only capture global params if they were provided by the server.
@@ -79,6 +127,7 @@ class FedProxStrategy(TrainingStrategy):
         self.global_params = {k: v.clone().detach() for k, v in model.named_parameters() if v.requires_grad}
 
     def calculate_loss_correction(self, model: torch.nn.Module) -> torch.Tensor:
+        """Calculate the proximal term: (mu / 2) * ||w - w_global||^2."""
         if self.global_params is None:
             return torch.tensor(0.0, device=next(model.parameters()).device)
 
@@ -94,14 +143,16 @@ class FedProxStrategy(TrainingStrategy):
         return (self.mu / 2.0) * proximal_term
 
     def after_optimizer_step(self, model: torch.nn.Module, lr: float) -> None:
+        """No-op for FedProx."""
         pass
 
     def after_training(self, model: torch.nn.Module, lr: float, steps: int) -> Dict[str, Any]:
+        """No extra metrics for FedProx."""
         return {}
 
 
 class ScaffoldStrategy(TrainingStrategy):
-    """SCAFFOLD strategy with control variates."""
+    """SCAFFOLD strategy with control variates to correct client drift."""
 
     def __init__(self, c_local: Dict[str, torch.Tensor]) -> None:
         self.c_local = c_local
@@ -109,6 +160,7 @@ class ScaffoldStrategy(TrainingStrategy):
         self.global_params: Optional[Dict[str, torch.Tensor]] = None
 
     def before_training(self, model: torch.nn.Module, shareable: Shareable, job_config: FederationJob) -> None:
+        """Initialize control variates (c_global) and capture global params."""
         logger.info("SCAFFOLD enabled. Capturing global params and controls.")
 
         # Only capture global params if present
@@ -122,11 +174,12 @@ class ScaffoldStrategy(TrainingStrategy):
             self.c_global = {k: torch.tensor(v) if not isinstance(v, torch.Tensor) else v for k, v in incoming.items()}
 
     def calculate_loss_correction(self, model: torch.nn.Module) -> torch.Tensor:
+        """SCAFFOLD applies correction directly to weights, not loss."""
         return torch.tensor(0.0, device=next(model.parameters()).device)
 
     def after_optimizer_step(self, model: torch.nn.Module, lr: float) -> None:
         """
-        Apply SCAFFOLD correction directly to parameters to support DP.
+        Apply SCAFFOLD correction directly to parameters.
         w <- w - lr * (c_global - c_local)
         """
         for name, param in model.named_parameters():
@@ -146,6 +199,10 @@ class ScaffoldStrategy(TrainingStrategy):
             param.data.add_(-(cg - cl) * lr)
 
     def after_training(self, model: torch.nn.Module, lr: float, steps: int) -> Dict[str, Any]:
+        """
+        Update local control variates (c_local) and return the difference (delta_c).
+        c_local_new <- c_local - c_global + (1 / (K * lr)) * (w_global - w_local)
+        """
         if self.global_params is None or steps <= 0:
             return {}
 

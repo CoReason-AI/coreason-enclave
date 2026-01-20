@@ -8,6 +8,13 @@
 #
 # Source Code: https://github.com/CoReason-AI/coreason_enclave
 
+"""
+Logging Utility.
+
+Configures the Loguru logger with custom formats and sinks (file and stdout).
+Ensures consistent logging across the application.
+"""
+
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING

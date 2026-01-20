@@ -8,6 +8,14 @@
 #
 # Source Code: https://github.com/CoReason-AI/coreason_enclave
 
+"""
+Coreason Executor for NVIDIA FLARE.
+
+This module implements the custom Executor that runs inside the TEE.
+It orchestrates the "Attest-Train-Aggregate" loop, managing hardware attestation,
+privacy guards, and strategy execution.
+"""
+
 import json
 import sys
 from typing import Dict, Optional, Tuple
@@ -50,7 +58,9 @@ DEFAULT_LR = 0.01
 class CoreasonExecutor(Executor):  # type: ignore[misc]
     """
     Coreason's custom Executor for NVIDIA FLARE.
-    Responsible for orchestrating the training process inside the TEE.
+
+    Responsible for orchestrating the training process inside the TEE ("The Enclave Wrapper").
+    It acts as the "Sightless Surgeon," training on local data without exposing it.
     """
 
     def __init__(
@@ -117,6 +127,8 @@ class CoreasonExecutor(Executor):  # type: ignore[misc]
         """
         Verify that the environment is trusted.
 
+        Performs Remote Attestation ("The Handshake").
+
         Raises:
             RuntimeError: If attestation fails or status is not TRUSTED.
         """
@@ -153,7 +165,15 @@ class CoreasonExecutor(Executor):  # type: ignore[misc]
             return None
 
     def _get_strategy(self, job_config: FederationJob) -> TrainingStrategy:
-        """Factory method to get the training strategy."""
+        """
+        Factory method to get the training strategy.
+
+        Args:
+            job_config: The federation job configuration.
+
+        Returns:
+            TrainingStrategy: The instantiated strategy (FedAvg, FedProx, or SCAFFOLD).
+        """
         if job_config.strategy == AggregationStrategy.FED_AVG:
             return FedAvgStrategy()
         elif job_config.strategy == AggregationStrategy.FED_PROX:
@@ -184,7 +204,7 @@ class CoreasonExecutor(Executor):  # type: ignore[misc]
             abort_signal: Signal.
 
         Returns:
-            Optional[Tuple[float, float, int]]: (avg_loss, epsilon, total_steps) or None.
+            Optional[Tuple[float, float, int]]: (avg_loss, epsilon, total_steps) or None if aborted.
         """
         model.train()
         total_loss = 0.0
@@ -239,6 +259,14 @@ class CoreasonExecutor(Executor):  # type: ignore[misc]
     ) -> Shareable:
         """
         Orchestrate the training workflow.
+
+        Steps:
+        1. Hardware Attestation.
+        2. Config Parsing.
+        3. Input Validation (Data Sentry).
+        4. Strategy & Privacy Initialization.
+        5. Training Loop.
+        6. Output Sanitization (Data Sentry).
         """
         # 1. Check Hardware Trust
         self._check_hardware_trust()

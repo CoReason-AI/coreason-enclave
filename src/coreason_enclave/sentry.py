@@ -8,6 +8,14 @@
 #
 # Source Code: https://github.com/CoReason-AI/coreason_enclave
 
+"""
+The Data Sentry: Firewall and Airlock for the Enclave.
+
+Responsible for:
+1. Validating input data before it enters the training loop.
+2. Sanitizing output data to prevent leakage (the "Airlock").
+"""
+
 import os
 from pathlib import Path
 from typing import Any, Dict, Protocol, runtime_checkable
@@ -19,6 +27,7 @@ from coreason_enclave.utils.logger import logger
 class ValidatorProtocol(Protocol):
     """
     Protocol for external data validators (e.g., coreason-validator).
+
     Decouples the enclave from specific validation implementations.
     """
 
@@ -49,6 +58,13 @@ class FileExistenceValidator:
         """
         Validate that the file exists at the given path.
         Schema is ignored for this basic validation.
+
+        Args:
+            data_path: Path to the file.
+            schema: Ignored.
+
+        Returns:
+            bool: True if file exists, False otherwise.
         """
         path = Path(data_path)
         if not path.exists():
@@ -67,7 +83,9 @@ class DataLeakageError(Exception):
 class DataSentry:
     """
     The Firewall / Airlock for the Enclave.
-    Responsible for input validation and output sanitation.
+
+    Responsible for input validation (preventing path traversal and invalid data)
+    and output sanitation (ensuring only allowed keys and non-sensitive data exit the enclave).
     """
 
     def __init__(self, validator: ValidatorProtocol) -> None:
@@ -86,6 +104,8 @@ class DataSentry:
     def validate_input(self, dataset_id: str, schema: Any) -> bool:
         """
         Validate input data before it is used for training.
+
+        Enforces path security (preventing traversal) and delegates content validation.
 
         Args:
             dataset_id: The identifier of the dataset (relative to COREASON_DATA_ROOT).
@@ -139,8 +159,9 @@ class DataSentry:
     def sanitize_output(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """
         Sanitize the output payload ("Airlock").
+
         Ensures only allowed keys and types exit the enclave.
-        Performs recursive checking to prevent nested data leakage.
+        Performs recursive inspection to prevent nested data leakage (e.g. PII in metadata).
 
         Args:
             payload: The dictionary to be sent out of the enclave.

@@ -8,6 +8,12 @@
 #
 # Source Code: https://github.com/CoReason-AI/coreason_enclave
 
+"""
+Simple MLP Model.
+
+A basic Multi-Layer Perceptron model for testing and validation purposes.
+"""
+
 import torch
 from torch import nn
 
@@ -18,9 +24,19 @@ from coreason_enclave.models.registry import ModelRegistry
 class SimpleMLP(nn.Module):  # type: ignore[misc]
     """
     A simple Multi-Layer Perceptron for testing and basic tasks.
+
+    Structure: Linear -> ReLU -> Linear.
     """
 
     def __init__(self, input_dim: int = 10, hidden_dim: int = 16, output_dim: int = 1) -> None:
+        """
+        Initialize the SimpleMLP.
+
+        Args:
+            input_dim: Input feature dimension.
+            hidden_dim: Hidden layer dimension.
+            output_dim: Output dimension.
+        """
         super().__init__()
         self.net = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
@@ -29,4 +45,5 @@ class SimpleMLP(nn.Module):  # type: ignore[misc]
         )
 
     def forward(self, x: "torch.Tensor") -> "torch.Tensor":
+        """Forward pass."""
         return self.net(x)

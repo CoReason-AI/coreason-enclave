@@ -8,6 +8,12 @@
 #
 # Source Code: https://github.com/CoReason-AI/coreason_enclave
 
+"""
+Hardware Interfaces.
+
+Defines the contract for hardware attestation providers.
+"""
+
 from abc import ABC, abstractmethod
 
 from coreason_enclave.schemas import AttestationReport
@@ -16,6 +22,7 @@ from coreason_enclave.schemas import AttestationReport
 class AttestationProvider(ABC):
     """
     Abstract Base Class for hardware attestation providers.
+
     Responsible for generating cryptographic evidence of the enclave's identity and integrity.
     """
 
