@@ -8,8 +8,8 @@
 #
 # Source Code: https://github.com/CoReason-AI/coreason_enclave
 
-from typing import Any, Dict
-from unittest.mock import MagicMock
+from typing import Any, Dict, Generator
+from unittest.mock import MagicMock, patch
 
 import pytest
 import torch
@@ -23,22 +23,31 @@ from coreason_enclave.schemas import AggregationStrategy, FederationJob, Privacy
 
 class TestScaffoldIntegration:
     @pytest.fixture
-    def executor(self) -> CoreasonExecutor:
+    def executor(self) -> Generator[CoreasonExecutor, None, None]:
         """Fixture for CoreasonExecutor."""
-        executor = CoreasonExecutor()
-        # Mock dependencies to avoid side effects
-        executor.attestation_provider = MagicMock()
-        executor.attestation_provider.attest.return_value.status = "TRUSTED"
-        executor.attestation_provider.attest.return_value.hardware_type = "TEST_HARDWARE"
+        with (
+            patch("coreason_enclave.services.get_attestation_provider") as mock_get_attestation,
+            patch("coreason_enclave.services.DataSentry") as MockDataSentry,
+            patch("coreason_enclave.services.DataLoaderFactory") as MockDataLoaderFactory,
+        ):
+            # Attestation
+            provider = MagicMock()
+            mock_get_attestation.return_value = provider
+            provider.attest.return_value.status = "TRUSTED"
+            provider.attest.return_value.hardware_type = "TEST_HARDWARE"
 
-        executor.data_loader_factory = MagicMock()
-        # Create a dummy loader
-        # SimpleMLP expects input_dim=10
-        dataset = torch.utils.data.TensorDataset(torch.randn(10, 10), torch.randn(10, 1))
-        loader = torch.utils.data.DataLoader(dataset, batch_size=2)
-        executor.data_loader_factory.get_loader.return_value = loader
+            # Sentry
+            sentry = MockDataSentry.return_value
+            sentry.sanitize_output.side_effect = lambda x: x
 
-        return executor
+            # DataLoader
+            loader_factory = MockDataLoaderFactory.return_value
+            dataset = torch.utils.data.TensorDataset(torch.randn(10, 10), torch.randn(10, 1))
+            loader = torch.utils.data.DataLoader(dataset, batch_size=2)
+            loader_factory.get_loader.return_value = loader
+
+            executor = CoreasonExecutor()
+            yield executor
 
     @pytest.fixture
     def job_config(self) -> FederationJob:
@@ -80,7 +89,7 @@ class TestScaffoldIntegration:
         assert result1.get_return_code() == ReturnCode.OK
 
         # Verify c_local was updated from 0 to something non-zero (due to drift)
-        local_weight_r1 = executor.scaffold_c_local["net.0.weight"].clone()
+        local_weight_r1 = executor.service._async.scaffold_c_local["net.0.weight"].clone()
         assert not torch.allclose(local_weight_r1, torch.tensor(0.0))
 
         # Prepare Shareable Round 2
@@ -101,7 +110,7 @@ class TestScaffoldIntegration:
         assert result2.get_return_code() == ReturnCode.OK
 
         # Verify c_local has evolved further
-        local_weight_r2 = executor.scaffold_c_local["net.0.weight"]
+        local_weight_r2 = executor.service._async.scaffold_c_local["net.0.weight"]
         assert not torch.allclose(local_weight_r2, local_weight_r1)
 
     def test_integration_execution(self, executor: CoreasonExecutor, job_config: FederationJob) -> None:
@@ -154,7 +163,7 @@ class TestScaffoldIntegration:
         assert "net.2.bias" in updates
 
         # Verify local state was updated
-        assert "net.0.weight" in executor.scaffold_c_local
+        assert "net.0.weight" in executor.service._async.scaffold_c_local
 
     def test_scaffold_strategy_isolation(self, executor: CoreasonExecutor, job_config: FederationJob) -> None:
         """Test that other strategies (e.g. FED_AVG) do NOT affect SCAFFOLD state."""
@@ -188,4 +197,4 @@ class TestScaffoldIntegration:
         assert "scaffold_updates" not in result
 
         # Verify local state is EMPTY (assuming fresh executor)
-        assert len(executor.scaffold_c_local) == 0
+        assert len(executor.service._async.scaffold_c_local) == 0

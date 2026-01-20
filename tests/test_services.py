@@ -66,8 +66,8 @@ class TestCoreasonEnclaveService:
 
                 assert result == {"params": {}}
 
-            # Verification
-            # Note: We can't easily verify anyio.run called __aenter__ directly on the mock class,
-            # but we can check if methods were called.
-            # However, since anyio.run runs in a loop, standard mocks might need care if checking call order.
-            # But here we just check if it was called.
+    def test_service_outside_context(self) -> None:
+        """Test that using service outside context manager raises RuntimeError."""
+        service = CoreasonEnclaveService()
+        with pytest.raises(RuntimeError, match="Service used outside of context manager"):
+            service.execute_training_task(Shareable(), Signal())
