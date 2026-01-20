@@ -153,8 +153,10 @@ class TestCLI:
 
             # Verify Executor Behavior
             executor = CoreasonExecutor()
-            assert isinstance(executor.attestation_provider, SimulationAttestationProvider)
-            executor._check_hardware_trust()
+            assert isinstance(executor.service._async.attestation_provider, SimulationAttestationProvider)
 
-            report = executor.attestation_provider.attest()
+            # Accessing private method via async service
+            executor.service._async._check_hardware_trust_sync()
+
+            report = executor.service._async.attestation_provider.attest()
             assert report.status == "TRUSTED"

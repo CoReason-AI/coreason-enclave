@@ -9,7 +9,6 @@
 # Source Code: https://github.com/CoReason-AI/coreason_enclave
 
 from typing import Dict
-from unittest.mock import MagicMock
 
 import pytest
 import torch
@@ -210,21 +209,14 @@ class TestStrategies:
         executor = CoreasonExecutor()
 
         # Mock dependencies
-        executor.attestation_provider = MagicMock()
-        executor.attestation_provider.attest.return_value.status = "TRUSTED"
-        executor.attestation_provider.attest.return_value.hardware_type = "TEST"
-        executor.data_loader_factory = MagicMock()
-
-        # Create a job config with unknown strategy
-        # Using a raw dict to bypass Pydantic validation for the sake of this unit test
-        # (Assuming we somehow got past pydantic or modified it internally)
-        # Actually, Pydantic prevents this at the boundary. But _get_strategy has an else block.
-        # We can just call _get_strategy directly.
+        # executor.service._async is accessible in test scope
+        # We need to ensure we can access _get_strategy which is protected.
+        # But this test wants to verify that INVALID strategy raises error.
 
         job = basic_job_config.model_copy()
         # Hack the enum value (since it's an enum, we might need to mock or cast)
-        # Ideally this is unreachable if Pydantic does its job, but for coverage of the 'else':
         job.strategy = "UNKNOWN_STRATEGY"  # type: ignore
 
+        # Accessing private method of internal async service
         with pytest.raises(ValueError, match="Unknown strategy"):
-            executor._get_strategy(job)
+            executor.service._async._get_strategy(job)

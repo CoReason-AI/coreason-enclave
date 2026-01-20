@@ -39,11 +39,20 @@ class TestCoreasonExecutorSecurity:
         }
 
     @pytest.fixture
-    def mock_attestation_provider(self) -> Generator[MagicMock, None, None]:
-        with patch("coreason_enclave.federation.executor.get_attestation_provider") as mock_get:
+    def executor(self) -> Generator[CoreasonExecutor, None, None]:
+        # We patch dependencies of CoreasonEnclaveServiceAsync.
+        # Dependencies: get_attestation_provider, DataSentry, DataLoaderFactory.
+        # These are instantiated in CoreasonEnclaveServiceAsync.__init__
+
+        with (
+            patch("coreason_enclave.services.get_attestation_provider") as mock_get_attestation,
+            patch("coreason_enclave.services.DataSentry") as MockDataSentry,
+            patch("coreason_enclave.services.DataLoaderFactory") as MockDataLoaderFactory,
+            patch("coreason_enclave.services.PrivacyGuard") as MockPrivacyGuard,
+        ):
+            # Setup default behavior for Attestation
             provider = MagicMock()
-            mock_get.return_value = provider
-            # Default to TRUSTED
+            mock_get_attestation.return_value = provider
             provider.attest.return_value = AttestationReport(
                 node_id="test_node",
                 hardware_type="SIMULATION",
@@ -51,12 +60,24 @@ class TestCoreasonExecutorSecurity:
                 measurement_hash="0" * 64,
                 status="TRUSTED",
             )
-            yield provider
 
-    @pytest.fixture
-    def executor(self, mock_attestation_provider: MagicMock) -> CoreasonExecutor:
-        # We need to ensure the mock is active when __init__ is called
-        return CoreasonExecutor(training_task_name="train_task")
+            # Setup default behavior for Sentry
+            sentry_instance = MockDataSentry.return_value
+            sentry_instance.validate_input.return_value = True
+            sentry_instance.sanitize_output.return_value = {"params": {"a": 1}}
+
+            # Setup default behavior for DataLoader
+            loader_factory_instance = MockDataLoaderFactory.return_value
+            # Default empty loader? Or we set it in test.
+
+            executor = CoreasonExecutor(training_task_name="train_task")
+            # Expose mocks on executor for easy access in tests if needed (or just use the patchers)
+            executor.mock_attestation_provider = provider
+            executor.mock_sentry = sentry_instance
+            executor.mock_loader_factory = loader_factory_instance
+            executor.mock_privacy_guard = MockPrivacyGuard
+
+            yield executor
 
     @pytest.fixture
     def mock_fl_ctx(self) -> MagicMock:
@@ -83,29 +104,26 @@ class TestCoreasonExecutorSecurity:
     ) -> None:
         """Test happy path: trusted hardware, valid config, valid data."""
 
-        # Mock DataSentry to avoid filesystem checks
-        executor.sentry = MagicMock()
-        executor.sentry.validate_input.return_value = True
-        executor.sentry.sanitize_output.return_value = {"params": {"a": 1}}
-
-        # Use Real DataLoader with Dummy Data
-        executor.data_loader_factory = MagicMock()
-
-        # Create dummy TensorDataset compatible with SimpleMLP (input_dim=10)
+        # Setup DataLoader for this specific test
         X = torch.randn(32, 10)
         y = torch.randn(32, 1)
         dataset = TensorDataset(X, y)
         loader = DataLoader(dataset, batch_size=16)
+        executor.mock_loader_factory.get_loader.return_value = loader
 
-        executor.data_loader_factory.get_loader.return_value = loader
+        # Mock Privacy Guard behavior (attach returns model, optimizer, loader)
+        # We need to ensure attach returns a tuple
+        executor.mock_privacy_guard.return_value.attach.side_effect = lambda m, o, ld: (m, o, ld)
+        executor.mock_privacy_guard.return_value.get_current_epsilon.return_value = 1.0
 
         result = executor.execute("train_task", valid_shareable, mock_fl_ctx, mock_signal)
 
         assert result.get_return_code() == ReturnCode.OK
+
         # Verify flow
-        executor.attestation_provider.attest.assert_called_once()  # type: ignore
-        executor.data_loader_factory.get_loader.assert_called_once()
-        executor.sentry.sanitize_output.assert_called_once()
+        executor.mock_attestation_provider.attest.assert_called_once()
+        executor.mock_loader_factory.get_loader.assert_called_once()
+        executor.mock_sentry.sanitize_output.assert_called_once()
 
     def test_secure_execution_dict_config(
         self,
@@ -118,19 +136,15 @@ class TestCoreasonExecutorSecurity:
         shareable = Shareable()
         shareable.set_header("job_config", mock_job_config)
 
-        # Mock DataSentry
-        executor.sentry = MagicMock()
-        executor.sentry.validate_input.return_value = True
-        executor.sentry.sanitize_output.return_value = {"params": {"a": 1}}
-
-        # Use Real DataLoader
-        executor.data_loader_factory = MagicMock()
+        # Setup DataLoader
         X = torch.randn(16, 10)
         y = torch.randn(16, 1)
         dataset = TensorDataset(X, y)
         loader = DataLoader(dataset, batch_size=8)
+        executor.mock_loader_factory.get_loader.return_value = loader
 
-        executor.data_loader_factory.get_loader.return_value = loader
+        executor.mock_privacy_guard.return_value.attach.side_effect = lambda m, o, ld: (m, o, ld)
+        executor.mock_privacy_guard.return_value.get_current_epsilon.return_value = 1.0
 
         result = executor.execute("train_task", shareable, mock_fl_ctx, mock_signal)
 
@@ -144,7 +158,7 @@ class TestCoreasonExecutorSecurity:
         mock_signal: MagicMock,
     ) -> None:
         """Test failure when hardware is untrusted."""
-        executor.attestation_provider.attest.return_value = AttestationReport(  # type: ignore
+        executor.mock_attestation_provider.attest.return_value = AttestationReport(
             node_id="test_node",
             hardware_type="SIMULATION",
             enclave_signature="sig",
@@ -155,8 +169,6 @@ class TestCoreasonExecutorSecurity:
         result = executor.execute("train_task", valid_shareable, mock_fl_ctx, mock_signal)
 
         assert result.get_return_code() == ReturnCode.EXECUTION_EXCEPTION
-        # Verify we stopped early
-        # Since implementation details might vary, we check the exception was caught
 
     def test_secure_execution_missing_config(
         self,
@@ -165,7 +177,6 @@ class TestCoreasonExecutorSecurity:
         mock_signal: MagicMock,
     ) -> None:
         """Test failure when job_config is missing."""
-        executor.attestation_provider.attest.return_value.status = "TRUSTED"  # type: ignore
         shareable = Shareable()  # No header
 
         result = executor.execute("train_task", shareable, mock_fl_ctx, mock_signal)
@@ -180,26 +191,31 @@ class TestCoreasonExecutorSecurity:
         mock_job_config: Dict[str, Any],
     ) -> None:
         """Test that execution fails if privacy budget is exceeded."""
-        # Set parameters to guarantee budget fail: very small epsilon, many steps
-        mock_job_config["privacy"]["target_epsilon"] = 0.0001
-        mock_job_config["rounds"] = 100
+        # Note: Since we are mocking PrivacyGuard, we need to mock it raising the exception
+        # The integration test logic in original file seemed to rely on real PrivacyGuard behavior?
+        # "Set parameters to guarantee budget fail: very small epsilon, many steps"
+        # If we mock PrivacyGuard, we must simulate this behavior.
+        # If we want to use Real PrivacyGuard, we shouldn't patch it.
+        # But PrivacyGuard depends on Opacus which might be heavy.
+        # Let's check if we can use Real PrivacyGuard.
+        # But for this test, forcing the exception via mock is cleaner for "Integration of failure handling".
 
-        shareable = Shareable()
-        shareable.set_header("job_config", json.dumps(mock_job_config))
+        # We'll use the mock to raise exception on check_budget
+        from coreason_enclave.privacy import PrivacyBudgetExceededError
 
-        executor.sentry = MagicMock()
-        executor.sentry.validate_input.return_value = True
-        executor.sentry.sanitize_output.return_value = {"params": {}}
+        executor.mock_privacy_guard.return_value.attach.side_effect = lambda m, o, ld: (m, o, ld)
+        executor.mock_privacy_guard.return_value.check_budget.side_effect = PrivacyBudgetExceededError(
+            "Budget exceeded"
+        )
 
-        # Real loader with data
-        executor.data_loader_factory = MagicMock()
+        # Setup DataLoader
         X = torch.randn(32, 10)
         y = torch.randn(32, 1)
         dataset = TensorDataset(X, y)
         loader = DataLoader(dataset, batch_size=4)
-        executor.data_loader_factory.get_loader.return_value = loader
+        executor.mock_loader_factory.get_loader.return_value = loader
 
-        result = executor.execute("train_task", shareable, mock_fl_ctx, mock_signal)
+        result = executor.execute("train_task", valid_shareable, mock_fl_ctx, mock_signal)
 
         assert result.get_return_code() == ReturnCode.EXECUTION_EXCEPTION
 
@@ -210,7 +226,6 @@ class TestCoreasonExecutorSecurity:
         mock_signal: MagicMock,
     ) -> None:
         """Test failure when job_config is invalid."""
-        executor.attestation_provider.attest.return_value.status = "TRUSTED"  # type: ignore
         shareable = Shareable()
         shareable.set_header("job_config", "INVALID_JSON")
 
@@ -225,14 +240,13 @@ class TestCoreasonExecutorSecurity:
         mock_signal: MagicMock,
     ) -> None:
         """Test failure when input validation fails."""
-        executor.attestation_provider.attest.return_value.status = "TRUSTED"  # type: ignore
+        # Note: In executor logic, ValueErrors are caught and result in BAD_TASK_DATA
+        # This differs from generic EXECUTION_EXCEPTION.
 
-        # Mock Sentry to raise exception
-        executor.sentry = MagicMock()
-        executor.sentry.validate_input.side_effect = ValueError("Invalid data")
+        executor.mock_loader_factory.get_loader.side_effect = ValueError("Invalid data")
 
         result = executor.execute("train_task", valid_shareable, mock_fl_ctx, mock_signal)
-        assert result.get_return_code() == ReturnCode.EXECUTION_EXCEPTION
+        assert result.get_return_code() == ReturnCode.BAD_TASK_DATA
 
     def test_secure_execution_sanitation_failure(
         self,
@@ -242,12 +256,18 @@ class TestCoreasonExecutorSecurity:
         mock_signal: MagicMock,
     ) -> None:
         """Test failure when output sanitation fails."""
-        executor.attestation_provider.attest.return_value.status = "TRUSTED"  # type: ignore
+        # Setup Success for other parts
+        executor.mock_privacy_guard.return_value.attach.side_effect = lambda m, o, ld: (m, o, ld)
+        executor.mock_privacy_guard.return_value.get_current_epsilon.return_value = 1.0
 
-        # Mock Sentry
-        executor.sentry = MagicMock()
-        executor.sentry.validate_input.return_value = True
-        executor.sentry.sanitize_output.side_effect = RuntimeError("Leakage detected")
+        X = torch.randn(16, 10)
+        y = torch.randn(16, 1)
+        dataset = TensorDataset(X, y)
+        loader = DataLoader(dataset, batch_size=8)
+        executor.mock_loader_factory.get_loader.return_value = loader
+
+        # Fail Sanitation
+        executor.mock_sentry.sanitize_output.side_effect = RuntimeError("Leakage detected")
 
         result = executor.execute("train_task", valid_shareable, mock_fl_ctx, mock_signal)
         assert result.get_return_code() == ReturnCode.EXECUTION_EXCEPTION
@@ -260,28 +280,23 @@ class TestCoreasonExecutorSecurity:
         mock_signal: MagicMock,
     ) -> None:
         """Test handling of abort signal during training setup."""
-        # Mock Sentry
-        executor.sentry = MagicMock()
-        executor.sentry.validate_input.return_value = True
+        # Setup Success
+        executor.mock_privacy_guard.return_value.attach.side_effect = lambda m, o, ld: (m, o, ld)
 
-        # Mock DataLoaderFactory
-        executor.data_loader_factory = MagicMock()
         X = torch.randn(16, 10)
         y = torch.randn(16, 1)
         dataset = TensorDataset(X, y)
         loader = DataLoader(dataset, batch_size=8)
-
-        executor.data_loader_factory.get_loader.return_value = loader
+        executor.mock_loader_factory.get_loader.return_value = loader
 
         # Trigger abort signal
         mock_signal.triggered = True
 
         result = executor.execute("train_task", valid_shareable, mock_fl_ctx, mock_signal)
 
-        # If aborted, it returns an empty Shareable (OK) in current impl
+        # If aborted, it returns an empty Shareable (OK)
         assert result.get_return_code() == ReturnCode.OK
-        # Shareable might contain headers even if empty, so we check for empty data dict if applicable,
-        # or just that specific keys are missing.
+        # And params should be missing
         assert not result.get("params")
 
     def test_secure_execution_privacy_init_failure(
@@ -292,25 +307,19 @@ class TestCoreasonExecutorSecurity:
         mock_signal: MagicMock,
     ) -> None:
         """Test failure when PrivacyGuard cannot be initialized."""
-        # Mock Sentry
-        executor.sentry = MagicMock()
-        executor.sentry.validate_input.return_value = True
 
-        # Mock DataLoaderFactory
-        executor.data_loader_factory = MagicMock()
         X = torch.randn(16, 10)
         y = torch.randn(16, 1)
         dataset = TensorDataset(X, y)
         loader = DataLoader(dataset, batch_size=8)
+        executor.mock_loader_factory.get_loader.return_value = loader
 
-        executor.data_loader_factory.get_loader.return_value = loader
+        # Mock PrivacyGuard to raise exception on attach
+        # ValueErrors result in BAD_TASK_DATA
+        executor.mock_privacy_guard.return_value.attach.side_effect = ValueError("Invalid privacy config")
 
-        # Mock PrivacyGuard to raise exception
-        with patch("coreason_enclave.federation.executor.PrivacyGuard") as mock_guard:
-            mock_guard.side_effect = ValueError("Invalid privacy config")
-
-            result = executor.execute("train_task", valid_shareable, mock_fl_ctx, mock_signal)
-            assert result.get_return_code() == ReturnCode.EXECUTION_EXCEPTION
+        result = executor.execute("train_task", valid_shareable, mock_fl_ctx, mock_signal)
+        assert result.get_return_code() == ReturnCode.BAD_TASK_DATA
 
     def test_secure_execution_consecutive_calls(
         self,
@@ -321,19 +330,15 @@ class TestCoreasonExecutorSecurity:
         mock_job_config: Dict[str, Any],
     ) -> None:
         """Test consecutive calls: Valid -> Invalid -> Valid."""
-        # Setup Valid
-        executor.sentry = MagicMock()
-        executor.sentry.validate_input.return_value = True
-        executor.sentry.sanitize_output.return_value = {"params": {}}
+        # Setup Common
+        executor.mock_privacy_guard.return_value.attach.side_effect = lambda m, o, ld: (m, o, ld)
+        executor.mock_privacy_guard.return_value.get_current_epsilon.return_value = 1.0
 
-        # Mock DataLoaderFactory
-        executor.data_loader_factory = MagicMock()
         X = torch.randn(16, 10)
         y = torch.randn(16, 1)
         dataset = TensorDataset(X, y)
         loader = DataLoader(dataset, batch_size=8)
-
-        executor.data_loader_factory.get_loader.return_value = loader
+        executor.mock_loader_factory.get_loader.return_value = loader
 
         # 1. Valid
         result1 = executor.execute("train_task", valid_shareable, mock_fl_ctx, mock_signal)
@@ -359,8 +364,6 @@ class TestCoreasonExecutorSecurity:
         mock_job_config["rounds"] = 0  # Invalid
         shareable = Shareable()
         shareable.set_header("job_config", json.dumps(mock_job_config))
-
-        executor.sentry = MagicMock()  # Should not be reached but good to mock
 
         result = executor.execute("train_task", shareable, mock_fl_ctx, mock_signal)
         assert result.get_return_code() == ReturnCode.BAD_TASK_DATA

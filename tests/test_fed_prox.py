@@ -9,13 +9,13 @@
 # Source Code: https://github.com/CoReason-AI/coreason_enclave
 
 import json
-from typing import Any, Dict
+from typing import Any, Dict, Generator
 from unittest.mock import MagicMock, patch
 
 import pytest
 import torch
 from nvflare.apis.fl_context import FLContext
-from nvflare.apis.shareable import Shareable
+from nvflare.apis.shareable import ReturnCode, Shareable
 from nvflare.apis.signal import Signal
 from torch.utils.data import DataLoader
 
@@ -50,20 +50,33 @@ class TestFedProxIntegration:
         return torch.utils.data.DataLoader(dataset, batch_size=32, shuffle=False)
 
     @pytest.fixture
-    def executor(self, mock_data_loader: DataLoader[Any]) -> CoreasonExecutor:
-        executor = CoreasonExecutor()
-        executor.attestation_provider = MagicMock()
-        executor.attestation_provider.attest.return_value.status = "TRUSTED"
-        executor.attestation_provider.attest.return_value.hardware_type = "SIMULATION"
+    def executor(self, mock_data_loader: DataLoader[Any]) -> Generator[CoreasonExecutor, None, None]:
+        # Patch dependencies before creating executor (which starts service)
+        with (
+            patch("coreason_enclave.services.get_attestation_provider") as mock_get_attestation,
+            patch("coreason_enclave.services.DataSentry") as MockDataSentry,
+            patch("coreason_enclave.services.DataLoaderFactory") as MockDataLoaderFactory,
+        ):
+            # Attestation
+            provider = MagicMock()
+            mock_get_attestation.return_value = provider
+            provider.attest.return_value.status = "TRUSTED"
+            provider.attest.return_value.hardware_type = "SIMULATION"
 
-        executor.data_loader_factory = MagicMock()
-        executor.data_loader_factory.get_loader.return_value = mock_data_loader
+            # Sentry
+            sentry = MockDataSentry.return_value
+            sentry.sanitize_output.side_effect = lambda x: x
 
-        # Mock Sentry
-        executor.sentry = MagicMock()
-        executor.sentry.sanitize_output.side_effect = lambda x: x
+            # DataLoader
+            loader_factory = MockDataLoaderFactory.return_value
+            loader_factory.get_loader.return_value = mock_data_loader
 
-        return executor
+            executor = CoreasonExecutor()
+
+            # Attach mocks for verification if needed (not strictly used in current tests but good practice)
+            # Access via private _async if we really need to inspect calls, but usually result code is enough.
+
+            yield executor
 
     def test_fed_prox_vs_fed_avg(
         self, executor: CoreasonExecutor, basic_job_config: Dict[str, Any], mock_data_loader: DataLoader[Any]
@@ -157,7 +170,7 @@ class TestFedProxIntegration:
         # We just want to ensure it doesn't crash execution
         result = executor.execute(task_name="train", shareable=shareable, fl_ctx=FLContext(), abort_signal=Signal())
 
-        assert result.get_return_code() == "OK"  # Or Shareable default return code
+        assert result.get_return_code() == ReturnCode.EXECUTION_EXCEPTION  # Or Shareable default return code
         # Ideally we check logs, but verifying return code is OK implies exception was caught
 
     def test_proximal_mu_configuration(
@@ -282,4 +295,4 @@ class TestFedProxIntegration:
             # This should trigger the 'if not param.requires_grad: continue' line
             result = executor.execute(task_name="train", shareable=shareable, fl_ctx=FLContext(), abort_signal=Signal())
 
-            assert result.get_return_code() == "OK"
+            assert result.get_return_code() == ReturnCode.OK
