@@ -14,11 +14,9 @@ from typing import Any, Dict, Generator
 from unittest.mock import MagicMock, patch
 
 import pytest
-import torch
 from nvflare.apis.fl_context import FLContext
 from nvflare.apis.shareable import ReturnCode, Shareable
 from nvflare.apis.signal import Signal
-from torch.utils.data import DataLoader, TensorDataset
 
 from coreason_enclave.federation.executor import CoreasonExecutor
 from coreason_enclave.schemas import AttestationReport
@@ -27,7 +25,18 @@ from coreason_enclave.schemas import AttestationReport
 class TestCoreasonExecutor:
     @pytest.fixture
     def mock_attestation_provider(self) -> Generator[MagicMock, None, None]:
-        with patch("coreason_enclave.federation.executor.get_attestation_provider") as mock_get:
+        # get_attestation_provider moved to services.py, so we mock it there if needed,
+        # or we mock it where it is imported in the code under test if it was there.
+        # But CoreasonExecutor uses CoreasonEnclaveService which uses get_attestation_provider.
+        # Since we are mocking executor.service in tests, we might not need this anymore for execution tests,
+        # but initialization might still trigger it if we don't mock Service class itself.
+
+        # We need to mock CoreasonEnclaveServiceAsync where it is used.
+        # In CoreasonExecutor.__init__, it calls CoreasonEnclaveService().
+        # CoreasonEnclaveService() calls CoreasonEnclaveServiceAsync().
+        # CoreasonEnclaveServiceAsync.__init__ calls get_attestation_provider().
+
+        with patch("coreason_enclave.services.get_attestation_provider") as mock_get:
             provider = MagicMock()
             mock_get.return_value = provider
             provider.attest.return_value = AttestationReport(
@@ -69,6 +78,7 @@ class TestCoreasonExecutor:
     def test_init(self, executor: CoreasonExecutor) -> None:
         """Test initialization of the executor."""
         assert executor.training_task_name == "train_task"
+        assert executor.service is not None
 
     def test_execute_unknown_task(
         self,
@@ -93,20 +103,14 @@ class TestCoreasonExecutor:
         shareable = Shareable()
         shareable.set_header("job_config", json.dumps(valid_job_config))
 
-        # Mock Sentry
-        executor.sentry = MagicMock()
-        executor.sentry.validate_input.return_value = True
-        executor.sentry.sanitize_output.return_value = {"params": {}}
-
-        # Use Real DataLoader
-        executor.data_loader_factory = MagicMock()
-        X = torch.randn(2, 10)
-        y = torch.randn(2, 1)
-        dataset = TensorDataset(X, y)
-        loader = DataLoader(dataset, batch_size=2)
-        executor.data_loader_factory.get_loader.return_value = loader
+        # Use Mock service for integration test to avoid complex async setup in this unit test
+        # We test real service in test_services.py
+        executor.service = MagicMock()
+        executor.service.execute_training_task.return_value = {"params": {}}
 
         result = executor.execute("train_task", shareable, mock_fl_ctx, mock_signal)
+
+        executor.service.execute_training_task.assert_called_once()
         assert isinstance(result, Shareable)
         assert result.get_return_code() == ReturnCode.OK
 
@@ -122,22 +126,13 @@ class TestCoreasonExecutor:
         shareable = Shareable()
         shareable.set_header("job_config", json.dumps(valid_job_config))
 
-        # Mock Sentry
-        executor.sentry = MagicMock()
-        executor.sentry.validate_input.return_value = True
-
-        # Use Real DataLoader
-        executor.data_loader_factory = MagicMock()
-        X = torch.randn(2, 10)
-        y = torch.randn(2, 1)
-        dataset = TensorDataset(X, y)
-        loader = DataLoader(dataset, batch_size=2)
-        executor.data_loader_factory.get_loader.return_value = loader
+        # Mock Service behavior
+        executor.service = MagicMock()
+        # If signal triggered, service might return empty result
+        executor.service.execute_training_task.return_value = {}
 
         result = executor.execute("train_task", shareable, mock_fl_ctx, mock_signal)
         assert isinstance(result, Shareable)
-        # Assuming abort returns empty shareable with OK (default) or ABORT?
-        # The implementation returns Shareable() which is OK.
         assert result.get_return_code() == ReturnCode.OK
 
     def test_execute_exception_handling(
@@ -148,8 +143,9 @@ class TestCoreasonExecutor:
     ) -> None:
         """Test that exceptions during execution are caught and handled."""
         shareable = Shareable()
-        # Mock _execute_training to raise an exception
-        executor._execute_training = MagicMock(side_effect=RuntimeError("Training failed"))  # type: ignore
+        # Mock service to raise exception
+        executor.service = MagicMock()
+        executor.service.execute_training_task.side_effect = RuntimeError("Service failed")
 
         result = executor.execute("train_task", shareable, mock_fl_ctx, mock_signal)
         assert isinstance(result, Shareable)
@@ -181,18 +177,8 @@ class TestCoreasonExecutor:
         shareable = Shareable()
         shareable.set_header("job_config", json.dumps(valid_job_config))
 
-        # Mock Sentry
-        executor.sentry = MagicMock()
-        executor.sentry.validate_input.return_value = True
-        executor.sentry.sanitize_output.return_value = {"params": {}}
-
-        # Use Real DataLoader
-        executor.data_loader_factory = MagicMock()
-        X = torch.randn(2, 10)
-        y = torch.randn(2, 1)
-        dataset = TensorDataset(X, y)
-        loader = DataLoader(dataset, batch_size=2)
-        executor.data_loader_factory.get_loader.return_value = loader
+        executor.service = MagicMock()
+        executor.service.execute_training_task.return_value = {"params": {}}
 
         # Should behave as training since it's the first check
         result = executor.execute("same_name", shareable, mock_fl_ctx, mock_signal)
