@@ -37,9 +37,9 @@ class TrainingStrategy(ABC):
         strategy-specific variables.
 
         Args:
-            model: The local model (already loaded with global weights).
-            shareable: The data received from the server.
-            job_config: The federation job configuration.
+            model (torch.nn.Module): The local model (already loaded with global weights).
+            shareable (Shareable): The data received from the server.
+            job_config (FederationJob): The federation job configuration.
         """
         pass  # pragma: no cover
 
@@ -49,7 +49,7 @@ class TrainingStrategy(ABC):
         Calculate any additional loss term (e.g., FedProx proximal term).
 
         Args:
-            model: The current model.
+            model (torch.nn.Module): The current model.
 
         Returns:
             torch.Tensor: The additional loss to add to the objective.
@@ -64,8 +64,8 @@ class TrainingStrategy(ABC):
         Used for strategies that need to apply corrections directly to weights (e.g. SCAFFOLD).
 
         Args:
-            model: The model.
-            lr: The learning rate.
+            model (torch.nn.Module): The model.
+            lr (float): The learning rate.
         """
         pass  # pragma: no cover
 
@@ -75,9 +75,9 @@ class TrainingStrategy(ABC):
         Called after training completes.
 
         Args:
-            model: The trained model.
-            lr: The learning rate.
-            steps: Total training steps taken.
+            model (torch.nn.Module): The trained model.
+            lr (float): The learning rate.
+            steps (int): Total training steps taken.
 
         Returns:
             Dict[str, Any]: Additional metrics or updates to send back to the server.
