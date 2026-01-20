@@ -184,3 +184,47 @@ class TestCoreasonExecutor:
         result = executor.execute("same_name", shareable, mock_fl_ctx, mock_signal)
         # Since _execute_training succeeds (returns Shareable()), result RC should be OK (default)
         assert result.get_return_code() == ReturnCode.OK
+
+    def test_close(self, executor: CoreasonExecutor) -> None:
+        """Test close method releases resources."""
+        executor.service = MagicMock()
+        executor.close()
+        executor.service.__exit__.assert_called_once()
+
+    def test_outer_exception_handling(
+        self,
+        executor: CoreasonExecutor,
+        mock_fl_ctx: MagicMock,
+        mock_signal: MagicMock,
+    ) -> None:
+        """Test that exception raised before training check is caught by outer block."""
+        # Force an exception early by making task_name comparison fail or something similar.
+        # It's hard to make string comparison fail.
+        # But we can mock logger to raise exception?
+        # Or mock self.training_task_name to define __eq__ that raises?
+
+        # Better: mock `self.service` to be None (and ignore type check), so attribute access raises AttributeError
+        executor.service = None  # type: ignore
+
+        # This will raise AttributeError when accessing self.service.execute_training_task inside inner block?
+        # No, `if task_name == self.training_task_name:` is first.
+        # If task name matches:
+        # `result_dict = self.service.execute_training_task(...)` -> AttributeError.
+        # This is inside inner try/except: `except Exception as e: logger... return EXECUTION_EXCEPTION`.
+        # So this tests INNER exception block.
+
+        # To test OUTER exception block, we need exception OUTSIDE inner block.
+        # Inner block is:
+        # try:
+        #    if task == training: ...
+        #    logger.warning...
+        #    return TASK_UNKNOWN
+        # except Exception: ...
+
+        # Wait, the inner block covers almost everything.
+        # Outer block covers `logger.warning("Received task...")`.
+        # If logger raises exception, outer block catches it.
+
+        with patch("coreason_enclave.federation.executor.logger.warning", side_effect=RuntimeError("Log warn failed")):
+            result = executor.execute("unknown_task", Shareable(), mock_fl_ctx, mock_signal)
+            assert result.get_return_code() == ReturnCode.EXECUTION_EXCEPTION

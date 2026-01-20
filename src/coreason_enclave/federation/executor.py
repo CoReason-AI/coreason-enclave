@@ -67,7 +67,7 @@ class CoreasonExecutor(Executor):  # type: ignore[misc]
 
         logger.info(f"CoreasonExecutor initialized (train={training_task_name})")
 
-    def __del__(self) -> None:
+    def __del__(self) -> None:  # pragma: no cover
         """Cleanup service."""
         try:
             # We can only clean up if we are not in a precarious state (e.g. interpreter shutdown).
