@@ -44,7 +44,7 @@ class PrivacyGuard:
         Initialize the PrivacyGuard.
 
         Args:
-            config: The privacy configuration (noise, clipping, epsilon).
+            config (PrivacyConfig): The privacy configuration (noise, clipping, epsilon).
         """
         self.config = config
         # Use RDP accountant for numerical stability
@@ -70,12 +70,13 @@ class PrivacyGuard:
         during the backward pass.
 
         Args:
-            model: The PyTorch model.
-            optimizer: The PyTorch optimizer.
-            data_loader: The data loader.
+            model (torch.nn.Module): The PyTorch model.
+            optimizer (torch.optim.Optimizer): The PyTorch optimizer.
+            data_loader (DataLoader[Any]): The data loader.
 
         Returns:
-            Tuple containing the private (model, optimizer, data_loader).
+            Tuple[torch.nn.Module, torch.optim.Optimizer, DataLoader[Any]]:
+                Tuple containing the private (model, optimizer, data_loader).
         """
         logger.info("Attaching Privacy Engine to optimizer and model.")
 
@@ -97,11 +98,11 @@ class PrivacyGuard:
         Calculate the current privacy budget spent.
 
         Args:
-            delta: The target delta for the epsilon calculation.
-                   Usually set to 1/N or smaller.
+            delta (float): The target delta for the epsilon calculation.
+                           Usually set to 1/N or smaller.
 
         Returns:
-            The current epsilon value.
+            float: The current epsilon value.
         """
         if self._optimizer is None:
             # If not attached or no steps taken, epsilon is 0
@@ -117,7 +118,7 @@ class PrivacyGuard:
         Aborts training if the budget is exhausted to prevent privacy leakage.
 
         Args:
-            delta: The delta value for epsilon calculation.
+            delta (float): The delta value for epsilon calculation.
 
         Raises:
             PrivacyBudgetExceededError: If current epsilon > target_epsilon or global hard limit (5.0).

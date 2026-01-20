@@ -48,8 +48,8 @@ def apply_security_policy(simulation_flag: bool, insecure_flag: bool) -> None:
     This ensures that production workloads cannot accidentally run in an untrusted environment.
 
     Args:
-        simulation_flag: True if --simulation was passed in CLI.
-        insecure_flag: True if --insecure was passed in CLI.
+        simulation_flag (bool): True if --simulation was passed in CLI.
+        insecure_flag (bool): True if --insecure was passed in CLI.
 
     Raises:
         RuntimeError: If simulation mode is requested via environment but the required CLI flag is missing.
@@ -85,7 +85,7 @@ def _build_nvflare_args(parsed_args: argparse.Namespace) -> List[str]:
     Translates coreason-enclave arguments to the format expected by NVFlare.
 
     Args:
-        parsed_args: The arguments parsed by coreason-enclave.
+        parsed_args (argparse.Namespace): The arguments parsed by coreason-enclave.
 
     Returns:
         List[str]: The argument list for nvflare.
@@ -127,7 +127,7 @@ def main(args: Optional[list[str]] = None) -> None:
     3. Invokes the NVFlare client process.
 
     Args:
-        args: Command line arguments. Defaults to sys.argv[1:].
+        args (Optional[list[str]]): Command line arguments. Defaults to sys.argv[1:].
     """
     logger.info("Starting Coreason Enclave Agent...")
 

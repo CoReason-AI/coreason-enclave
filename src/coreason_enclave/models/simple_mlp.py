@@ -33,9 +33,9 @@ class SimpleMLP(nn.Module):  # type: ignore[misc]
         Initialize the SimpleMLP.
 
         Args:
-            input_dim: Input feature dimension.
-            hidden_dim: Hidden layer dimension.
-            output_dim: Output dimension.
+            input_dim (int): Input feature dimension.
+            hidden_dim (int): Hidden layer dimension.
+            output_dim (int): Output dimension.
         """
         super().__init__()
         self.net = nn.Sequential(

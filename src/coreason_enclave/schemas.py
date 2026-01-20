@@ -41,10 +41,10 @@ class PrivacyConfig(BaseModel):
     Configuration for Differential Privacy (DP-SGD).
 
     Attributes:
-        mechanism: Privacy mechanism to use (default: "DP_SGD").
-        noise_multiplier: Amount of noise to add (sigma).
-        max_grad_norm: Maximum gradient norm for clipping (C).
-        target_epsilon: Target privacy budget (epsilon).
+        mechanism (str): Privacy mechanism to use (default: "DP_SGD").
+        noise_multiplier (float): Amount of noise to add (sigma).
+        max_grad_norm (float): Maximum gradient norm for clipping (C).
+        target_epsilon (float): Target privacy budget (epsilon).
     """
 
     mechanism: str = Field(default="DP_SGD", description="Privacy mechanism to use")
@@ -82,15 +82,15 @@ class FederationJob(BaseModel):
     Definition of a Federated Learning job.
 
     Attributes:
-        job_id: Unique identifier for the job.
-        clients: List of participating client node IDs.
-        min_clients: Minimum number of clients required to proceed.
-        rounds: Number of training rounds.
-        dataset_id: Identifier/path for the training dataset (relative to data root).
-        model_arch: ID of the model architecture in the Registry.
-        strategy: Aggregation strategy (FED_AVG, FED_PROX, SCAFFOLD).
-        proximal_mu: Proximal term coefficient for FedProx (default: 0.01).
-        privacy: Differential Privacy configuration.
+        job_id (UUID): Unique identifier for the job.
+        clients (List[str]): List of participating client node IDs.
+        min_clients (int): Minimum number of clients required to proceed.
+        rounds (int): Number of training rounds.
+        dataset_id (str): Identifier/path for the training dataset (relative to data root).
+        model_arch (str): ID of the model architecture in the Registry.
+        strategy (AggregationStrategy): Aggregation strategy (FED_AVG, FED_PROX, SCAFFOLD).
+        proximal_mu (float): Proximal term coefficient for FedProx (default: 0.01).
+        privacy (PrivacyConfig): Differential Privacy configuration.
     """
 
     job_id: UUID
@@ -160,11 +160,11 @@ class AttestationReport(BaseModel):
     Contains the cryptographic evidence required for Remote Attestation.
 
     Attributes:
-        node_id: Identifier of the node.
-        hardware_type: Type of hardware (e.g., NVIDIA_H100_HOPPER).
-        enclave_signature: The hardware quote/signature.
-        measurement_hash: SHA256 hash of the running binary (measurement).
-        status: Trust status ("TRUSTED" or "UNTRUSTED").
+        node_id (str): Identifier of the node.
+        hardware_type (str): Type of hardware (e.g., NVIDIA_H100_HOPPER).
+        enclave_signature (str): The hardware quote/signature.
+        measurement_hash (str): SHA256 hash of the running binary (measurement).
+        status (Literal["TRUSTED", "UNTRUSTED"]): Trust status.
     """
 
     node_id: str
