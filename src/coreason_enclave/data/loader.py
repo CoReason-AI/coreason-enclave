@@ -8,6 +8,13 @@
 #
 # Source Code: https://github.com/CoReason-AI/coreason_enclave
 
+"""
+Data Loading Utilities.
+
+Provides a factory for securely loading data from disk into PyTorch DataLoaders.
+Integrates with DataSentry to ensure path security.
+"""
+
 import os
 from pathlib import Path
 
@@ -21,10 +28,17 @@ from coreason_enclave.utils.logger import logger
 class DataLoaderFactory:
     """
     Factory to create PyTorch DataLoaders from secured dataset IDs.
-    Integrates with DataSentry for path validation.
+
+    Integrates with DataSentry for path validation to prevent traversal attacks.
     """
 
     def __init__(self, sentry: DataSentry):
+        """
+        Initialize the DataLoaderFactory.
+
+        Args:
+            sentry: The DataSentry instance for validation.
+        """
         self.sentry = sentry
 
     def get_loader(self, dataset_id: str, batch_size: int = 32) -> DataLoader:
@@ -83,6 +97,7 @@ class DataLoaderFactory:
     def _load_csv(self, path: Path, batch_size: int) -> DataLoader:
         """
         Load a CSV file.
+
         Assumes last column is label, rest are features.
         Values must be numeric.
         """

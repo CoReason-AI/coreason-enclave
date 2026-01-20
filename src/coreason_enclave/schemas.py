@@ -8,6 +8,12 @@
 #
 # Source Code: https://github.com/CoReason-AI/coreason_enclave
 
+"""
+Data schemas for the Coreason Enclave.
+
+Defines the structures for federation jobs, privacy configuration, and attestation reports.
+"""
+
 from enum import Enum
 from typing import List, Literal
 from uuid import UUID
@@ -16,15 +22,30 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class AggregationStrategy(str, Enum):
-    """Strategy for aggregating model updates in Federated Learning."""
+    """
+    Strategy for aggregating model updates in Federated Learning.
 
-    FED_AVG = "FED_AVG"  # Standard averaging
-    FED_PROX = "FED_PROX"  # Handles non-IID data
-    SCAFFOLD = "SCAFFOLD"  # Controls client drift
+    Attributes:
+        FED_AVG: Standard Federated Averaging.
+        FED_PROX: FedProx strategy for robustness to non-IID data (proximal term).
+        SCAFFOLD: SCAFFOLD strategy for controlling client drift.
+    """
+
+    FED_AVG = "FED_AVG"
+    FED_PROX = "FED_PROX"
+    SCAFFOLD = "SCAFFOLD"
 
 
 class PrivacyConfig(BaseModel):
-    """Configuration for Differential Privacy (DP-SGD)."""
+    """
+    Configuration for Differential Privacy (DP-SGD).
+
+    Attributes:
+        mechanism: Privacy mechanism to use (default: "DP_SGD").
+        noise_multiplier: Amount of noise to add (sigma).
+        max_grad_norm: Maximum gradient norm for clipping (C).
+        target_epsilon: Target privacy budget (epsilon).
+    """
 
     mechanism: str = Field(default="DP_SGD", description="Privacy mechanism to use")
     noise_multiplier: float = Field(..., description="Amount of noise to add")
@@ -34,6 +55,7 @@ class PrivacyConfig(BaseModel):
     @field_validator("noise_multiplier")
     @classmethod
     def validate_noise_multiplier(cls, v: float) -> float:
+        """Validate that noise_multiplier is non-negative."""
         if v < 0:
             raise ValueError("noise_multiplier must be non-negative")
         return v
@@ -41,6 +63,7 @@ class PrivacyConfig(BaseModel):
     @field_validator("max_grad_norm")
     @classmethod
     def validate_max_grad_norm(cls, v: float) -> float:
+        """Validate that max_grad_norm is positive."""
         if v <= 0:
             raise ValueError("max_grad_norm must be positive")
         return v
@@ -48,13 +71,27 @@ class PrivacyConfig(BaseModel):
     @field_validator("target_epsilon")
     @classmethod
     def validate_target_epsilon(cls, v: float) -> float:
+        """Validate that target_epsilon is positive."""
         if v <= 0:
             raise ValueError("target_epsilon must be positive")
         return v
 
 
 class FederationJob(BaseModel):
-    """Definition of a Federated Learning job."""
+    """
+    Definition of a Federated Learning job.
+
+    Attributes:
+        job_id: Unique identifier for the job.
+        clients: List of participating client node IDs.
+        min_clients: Minimum number of clients required to proceed.
+        rounds: Number of training rounds.
+        dataset_id: Identifier/path for the training dataset (relative to data root).
+        model_arch: ID of the model architecture in the Registry.
+        strategy: Aggregation strategy (FED_AVG, FED_PROX, SCAFFOLD).
+        proximal_mu: Proximal term coefficient for FedProx (default: 0.01).
+        privacy: Differential Privacy configuration.
+    """
 
     job_id: UUID
     clients: List[str] = Field(..., description="List of participating client node IDs")
@@ -69,6 +106,7 @@ class FederationJob(BaseModel):
     @field_validator("proximal_mu")
     @classmethod
     def validate_proximal_mu(cls, v: float) -> float:
+        """Validate that proximal_mu is non-negative."""
         if v < 0:
             raise ValueError("proximal_mu must be non-negative")
         return v
@@ -76,6 +114,7 @@ class FederationJob(BaseModel):
     @field_validator("dataset_id")
     @classmethod
     def validate_dataset_id(cls, v: str) -> str:
+        """Validate that dataset_id is not empty."""
         if not v or not v.strip():
             raise ValueError("dataset_id cannot be empty")
         return v
@@ -83,6 +122,7 @@ class FederationJob(BaseModel):
     @field_validator("model_arch")
     @classmethod
     def validate_model_arch(cls, v: str) -> str:
+        """Validate that model_arch is not empty."""
         if not v or not v.strip():
             raise ValueError("model_arch cannot be empty")
         return v
@@ -90,6 +130,7 @@ class FederationJob(BaseModel):
     @field_validator("rounds")
     @classmethod
     def validate_rounds(cls, v: int) -> int:
+        """Validate that rounds is between 1 and 10000."""
         if not (1 <= v <= 10000):
             raise ValueError("rounds must be between 1 and 10000")
         return v
@@ -97,12 +138,14 @@ class FederationJob(BaseModel):
     @field_validator("clients")
     @classmethod
     def validate_clients_unique(cls, v: List[str]) -> List[str]:
+        """Validate that client IDs are unique."""
         if len(v) != len(set(v)):
             raise ValueError("clients list must contain unique node IDs")
         return v
 
     @model_validator(mode="after")
     def validate_min_clients_logic(self) -> "FederationJob":
+        """Validate consistency between min_clients and clients list."""
         if self.min_clients < 1:
             raise ValueError("min_clients must be at least 1")
         if self.min_clients > len(self.clients):
@@ -111,7 +154,18 @@ class FederationJob(BaseModel):
 
 
 class AttestationReport(BaseModel):
-    """Report from the Trusted Execution Environment (TEE)."""
+    """
+    Report from the Trusted Execution Environment (TEE).
+
+    Contains the cryptographic evidence required for Remote Attestation.
+
+    Attributes:
+        node_id: Identifier of the node.
+        hardware_type: Type of hardware (e.g., NVIDIA_H100_HOPPER).
+        enclave_signature: The hardware quote/signature.
+        measurement_hash: SHA256 hash of the running binary (measurement).
+        status: Trust status ("TRUSTED" or "UNTRUSTED").
+    """
 
     node_id: str
     hardware_type: str = Field(..., description="e.g. NVIDIA_H100_HOPPER")
@@ -122,6 +176,7 @@ class AttestationReport(BaseModel):
     @field_validator("measurement_hash")
     @classmethod
     def validate_hash_format(cls, v: str) -> str:
+        """Validate that measurement_hash is a valid SHA256 hex string."""
         # Check length for SHA256 hex string (64 characters)
         if len(v) != 64:
             raise ValueError("measurement_hash must be a 64-character hex string (SHA256)")

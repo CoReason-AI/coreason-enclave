@@ -8,6 +8,13 @@
 #
 # Source Code: https://github.com/CoReason-AI/coreason_enclave
 
+"""
+Privacy Guard: Differential Privacy Management.
+
+Handles the integration with Opacus to enforce Differential Privacy (DP-SGD),
+including gradient clipping, noise injection, and strict privacy budget (epsilon) tracking.
+"""
+
 from typing import Any, Tuple, cast
 
 import torch
@@ -27,7 +34,9 @@ class PrivacyBudgetExceededError(Exception):
 class PrivacyGuard:
     """
     Manages Differential Privacy (DP) for the training process using Opacus.
-    Responsible for gradient clipping, noise injection, and budget tracking.
+
+    The "Noise Injector" ensuring that gradients are clipped and noised
+    before leaving the secure enclave.
     """
 
     def __init__(self, config: PrivacyConfig) -> None:
@@ -56,7 +65,9 @@ class PrivacyGuard:
     ) -> Tuple[torch.nn.Module, torch.optim.Optimizer, DataLoader[Any]]:
         """
         Attach the Privacy Engine to the PyTorch components.
-        This wraps the optimizer to perform gradient clipping and noise addition.
+
+        This wraps the optimizer to perform gradient clipping and noise addition
+        during the backward pass.
 
         Args:
             model: The PyTorch model.
@@ -103,11 +114,13 @@ class PrivacyGuard:
         """
         Check if the privacy budget has been exceeded.
 
+        Aborts training if the budget is exhausted to prevent privacy leakage.
+
         Args:
             delta: The delta value for epsilon calculation.
 
         Raises:
-            PrivacyBudgetExceededError: If current epsilon > target_epsilon.
+            PrivacyBudgetExceededError: If current epsilon > target_epsilon or global hard limit (5.0).
         """
         current_epsilon = self.get_current_epsilon(delta)
 
