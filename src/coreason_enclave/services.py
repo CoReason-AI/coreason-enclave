@@ -202,10 +202,13 @@ class CoreasonEnclaveServiceAsync:
         try:
             dataset_id = job_config.dataset_id
             model_arch = job_config.model_arch
+            user_context = job_config.user_context
 
             # Data Loading (Sync IO, might be heavy)
             # running in thread to avoid blocking loop
-            train_loader = await anyio.to_thread.run_sync(self.data_loader_factory.get_loader, dataset_id, 32)
+            train_loader = await anyio.to_thread.run_sync(
+                self.data_loader_factory.get_loader, dataset_id, user_context, 32
+            )
 
             # Model Instantiation
             model_cls = ModelRegistry.get(model_arch)
@@ -229,7 +232,7 @@ class CoreasonEnclaveServiceAsync:
 
             # Privacy & Optimizer
             optimizer = optim.SGD(model.parameters(), lr=DEFAULT_LR)
-            privacy_guard = PrivacyGuard(config=job_config.privacy)
+            privacy_guard = PrivacyGuard(config=job_config.privacy, user_context=user_context)
 
             # Opacus attach might be CPU intensive
             model, optimizer, train_loader = await anyio.to_thread.run_sync(

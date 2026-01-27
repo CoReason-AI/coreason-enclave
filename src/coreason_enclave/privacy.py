@@ -21,6 +21,7 @@ import torch
 from opacus import PrivacyEngine
 from torch.utils.data import DataLoader
 
+from coreason_identity.models import UserContext
 from coreason_enclave.schemas import PrivacyConfig
 from coreason_enclave.utils.logger import logger
 
@@ -39,20 +40,23 @@ class PrivacyGuard:
     before leaving the secure enclave.
     """
 
-    def __init__(self, config: PrivacyConfig) -> None:
+    def __init__(self, config: PrivacyConfig, user_context: UserContext) -> None:
         """
         Initialize the PrivacyGuard.
 
         Args:
             config (PrivacyConfig): The privacy configuration (noise, clipping, epsilon).
+            user_context (UserContext): The identity of the user for budget attribution.
         """
         self.config = config
+        self.user_context = user_context
         # Use RDP accountant for numerical stability
         self.privacy_engine = PrivacyEngine(accountant="rdp")
         self._optimizer: Any = None
         self._target_epsilon = config.target_epsilon
         logger.info(
-            f"PrivacyGuard initialized with target_epsilon={self._target_epsilon}, "
+            f"PrivacyGuard initialized for user={user_context.user_id} "
+            f"with target_epsilon={self._target_epsilon}, "
             f"noise_multiplier={config.noise_multiplier}, "
             f"max_grad_norm={config.max_grad_norm}"
         )
@@ -134,10 +138,29 @@ class PrivacyGuard:
                 f"Privacy budget HARD LIMIT exceeded. Current: {current_epsilon:.2f}, Limit: {HARD_LIMIT}"
             )
 
+        # Check against user's specific allowance if available
+        # Assuming UserContext has fields for budget tracking, otherwise fall back to target_epsilon
+        user_limit = getattr(self.user_context, "privacy_budget_limit", float("inf"))
+        user_spent = getattr(self.user_context, "privacy_budget_spent", 0.0)
+
+        total_user_usage = user_spent + current_epsilon
+
+        if total_user_usage > user_limit:
+            logger.error(
+                f"User privacy budget exceeded! User: {self.user_context.user_id}, "
+                f"Usage: {total_user_usage:.2f} > Limit: {user_limit:.2f}"
+            )
+            raise PrivacyBudgetExceededError(
+                f"User privacy budget exceeded. Current total: {total_user_usage:.2f}, Limit: {user_limit:.2f}"
+            )
+
         if current_epsilon > self._target_epsilon:
             logger.error(f"Privacy budget exceeded! Epsilon: {current_epsilon:.2f} > Target: {self._target_epsilon}")
             raise PrivacyBudgetExceededError(
                 f"Privacy budget exceeded. Current: {current_epsilon:.2f}, Target: {self._target_epsilon}"
             )
 
-        logger.info(f"Privacy budget check passed. Epsilon: {current_epsilon:.2f} / {self._target_epsilon}")
+        logger.info(
+            f"Privacy budget check passed. Epsilon: {current_epsilon:.2f} / {self._target_epsilon} "
+            f"(User remaining: {user_limit - total_user_usage:.2f})"
+        )

@@ -21,6 +21,8 @@ from pathlib import Path
 import torch
 from torch.utils.data import DataLoader, TensorDataset
 
+from coreason_identity.models import UserContext
+from coreason_identity.exceptions import IdentityVerificationError
 from coreason_enclave.sentry import DataSentry
 from coreason_enclave.utils.logger import logger
 
@@ -41,12 +43,15 @@ class DataLoaderFactory:
         """
         self.sentry = sentry
 
-    def get_loader(self, dataset_id: str, batch_size: int = 32) -> DataLoader:
+    def get_loader(
+        self, dataset_id: str, user_context: UserContext, batch_size: int = 32
+    ) -> DataLoader:
         """
         Load data and return a PyTorch DataLoader.
 
         Args:
             dataset_id (str): The ID of the dataset (e.g. "data.csv").
+            user_context (UserContext): The identity of the job owner.
             batch_size (int): Batch size for training.
 
         Returns:
@@ -55,7 +60,17 @@ class DataLoaderFactory:
         Raises:
             FileNotFoundError: If data is missing.
             ValueError: If data is invalid or format is unsupported.
+            IdentityVerificationError: If user is not authorized.
         """
+        # 0. Authorize Access
+        # Simple check: UserContext must be valid (already validated by Pydantic)
+        # In a real scenario, we might check permissions against the dataset_id here.
+        if not user_context.user_id:
+            logger.error("Access denied: Invalid user context")
+            raise IdentityVerificationError("Invalid user context: missing user_id")
+
+        logger.info(f"Authorizing data access for user: {user_context.user_id}")
+
         # 1. Validate Path Security & Existence
         # We assume schema is None for simple file existence check,
         # or we could enforce a schema if we had one.

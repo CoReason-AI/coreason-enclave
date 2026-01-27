@@ -20,6 +20,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from coreason_identity.models import UserContext
+
 
 class AggregationStrategy(str, Enum):
     """
@@ -102,6 +104,7 @@ class FederationJob(BaseModel):
     strategy: AggregationStrategy
     proximal_mu: float = Field(0.01, description="Proximal term coefficient for FedProx")
     privacy: PrivacyConfig
+    user_context: UserContext = Field(..., description="Identity of the job owner")
 
     @field_validator("proximal_mu")
     @classmethod
