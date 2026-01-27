@@ -7,12 +7,12 @@
 # Commercial use beyond a 30-day trial requires a separate license.
 #
 # Source Code: https://github.com/CoReason-AI/coreason_enclave
-
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 import torch
+from coreason_identity.exceptions import IdentityVerificationError
 from coreason_identity.models import UserContext
 
 from coreason_enclave.data.loader import DataLoaderFactory
@@ -80,3 +80,16 @@ def test_unsupported_format(loader_factory: DataLoaderFactory, tmp_path: Path) -
     with patch.dict("os.environ", {"COREASON_DATA_ROOT": str(tmp_path)}):
         with pytest.raises(ValueError, match="Unsupported file format"):
             loader_factory.get_loader("data.txt", user_context=valid_user_context)
+
+
+def test_loader_invalid_user_context(loader_factory: DataLoaderFactory) -> None:
+    """Test failure when UserContext has empty user_id."""
+    invalid_context = UserContext(
+        user_id="",  # Empty
+        username="tester",
+        privacy_budget_spent=0.0,
+        privacy_budget_limit=10.0,
+    )
+
+    with pytest.raises(IdentityVerificationError, match="Invalid user context"):
+        loader_factory.get_loader("data.csv", user_context=invalid_context)
