@@ -41,6 +41,12 @@ class TestFedProxIntegration:
             "model_arch": "SimpleMLP",
             "strategy": "FED_AVG",  # Default to FED_AVG
             "privacy": {"noise_multiplier": 1.0, "max_grad_norm": 1.0, "target_epsilon": 10.0},
+            "user_context": {
+                "user_id": "u1",
+                "username": "user1",
+                "privacy_budget_spent": 0.0,
+                "privacy_budget_limit": 10.0,
+            },
         }
 
     @pytest.fixture
@@ -183,18 +189,18 @@ class TestFedProxIntegration:
     ) -> None:
         """Test that proximal_mu defaults correctly and can be overridden."""
         # 1. Default
-        job = FederationJob(user_context=valid_user_context, **basic_job_config)
+        job = FederationJob(**basic_job_config)
         assert job.proximal_mu == 0.01
 
         # 2. Override
         basic_job_config["proximal_mu"] = 0.5
-        job = FederationJob(user_context=valid_user_context, **basic_job_config)
+        job = FederationJob(**basic_job_config)
         assert job.proximal_mu == 0.5
 
         # 3. Invalid
         basic_job_config["proximal_mu"] = -0.1
         with pytest.raises(ValueError, match="non-negative"):
-            FederationJob(user_context=valid_user_context, **basic_job_config)
+            FederationJob(**basic_job_config)
 
     def test_fed_prox_mu_zero(
         self, executor: CoreasonExecutor, basic_job_config: Dict[str, Any], mock_data_loader: DataLoader[Any]

@@ -223,7 +223,7 @@ class TestCoreasonExecutorSecurity:
 
         result = executor.execute("train_task", valid_shareable, mock_fl_ctx, mock_signal)
 
-        assert result.get_return_code() == ReturnCode.EXECUTION_EXCEPTION
+        assert result.get_return_code() == ReturnCode.EXECUTION_RESULT_ERROR
 
     def test_secure_execution_invalid_config(
         self,
