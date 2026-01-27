@@ -8,8 +8,12 @@
 #
 # Source Code: https://github.com/CoReason-AI/coreason_enclave
 
+import os
 import sys
 from unittest.mock import MagicMock
+
+# Inject mocks into path for testing
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "mocks"))
 
 # NVFlare 2.7.1 has an issue on Windows where it imports 'resource' (Unix-only).
 # We mock it here to allow test collection to proceed on Windows.

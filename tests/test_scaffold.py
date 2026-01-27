@@ -13,12 +13,17 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 import torch
+from coreason_identity.models import UserContext
 from nvflare.apis.fl_context import FLContext
 from nvflare.apis.shareable import ReturnCode, Shareable
 from nvflare.apis.signal import Signal
 
 from coreason_enclave.federation.executor import CoreasonExecutor
 from coreason_enclave.schemas import AggregationStrategy, FederationJob, PrivacyConfig
+
+valid_user_context = UserContext(
+    user_id="test_user", username="tester", privacy_budget_spent=0.0, privacy_budget_limit=10.0
+)
 
 
 class TestScaffoldIntegration:
@@ -52,6 +57,7 @@ class TestScaffoldIntegration:
     @pytest.fixture
     def job_config(self) -> FederationJob:
         return FederationJob(
+            user_context=valid_user_context,
             job_id="00000000-0000-0000-0000-000000000000",
             clients=["client1"],
             min_clients=1,

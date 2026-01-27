@@ -12,10 +12,15 @@ from typing import Any, Tuple, cast
 
 import pytest
 import torch
+from coreason_identity.models import UserContext
 from torch.utils.data import DataLoader, TensorDataset
 
 from coreason_enclave.privacy import PrivacyBudgetExceededError, PrivacyGuard
 from coreason_enclave.schemas import PrivacyConfig
+
+valid_user_context = UserContext(
+    user_id="test_user", username="tester", privacy_budget_spent=0.0, privacy_budget_limit=10.0
+)
 
 
 @pytest.fixture
@@ -40,7 +45,7 @@ def simple_model_optimizer_dataloader() -> Tuple[torch.nn.Module, torch.optim.Op
 
 
 def test_privacy_guard_initialization(valid_privacy_config: PrivacyConfig) -> None:
-    guard = PrivacyGuard(valid_privacy_config)
+    guard = PrivacyGuard(valid_privacy_config, user_context=valid_user_context)
     assert guard.config == valid_privacy_config
     assert guard._target_epsilon == 3.0
     assert guard.get_current_epsilon() == 0.0
@@ -50,7 +55,7 @@ def test_privacy_guard_attach(
     valid_privacy_config: PrivacyConfig,
     simple_model_optimizer_dataloader: Tuple[torch.nn.Module, torch.optim.Optimizer, DataLoader[Any]],
 ) -> None:
-    guard = PrivacyGuard(valid_privacy_config)
+    guard = PrivacyGuard(valid_privacy_config, user_context=valid_user_context)
     model, optimizer, dataloader = simple_model_optimizer_dataloader
 
     p_model, p_optimizer, p_dataloader = guard.attach(model, optimizer, dataloader)
@@ -71,7 +76,7 @@ def test_privacy_budget_tracking(
     # Increase delta for testing or keep small
     delta = 1e-5
 
-    guard = PrivacyGuard(valid_privacy_config)
+    guard = PrivacyGuard(valid_privacy_config, user_context=valid_user_context)
     model, optimizer, dataloader = simple_model_optimizer_dataloader
     p_model, p_optimizer, p_dataloader = guard.attach(model, optimizer, dataloader)
 
@@ -105,7 +110,7 @@ def test_privacy_budget_exceeded(
         max_grad_norm=1.0,
         target_epsilon=0.0001,
     )
-    guard = PrivacyGuard(config)
+    guard = PrivacyGuard(config, user_context=valid_user_context)
     model, optimizer, dataloader = simple_model_optimizer_dataloader
     p_model, p_optimizer, p_dataloader = guard.attach(model, optimizer, dataloader)
 
@@ -139,7 +144,7 @@ def test_hard_limit_exceeded(
         max_grad_norm=1.0,
         target_epsilon=10.0,  # Higher than hard limit 5.0
     )
-    guard = PrivacyGuard(config)
+    guard = PrivacyGuard(config, user_context=valid_user_context)
     model, optimizer, dataloader = simple_model_optimizer_dataloader
     p_model, p_optimizer, p_dataloader = guard.attach(model, optimizer, dataloader)
 
@@ -171,5 +176,44 @@ def test_hard_limit_exceeded(
 
 def test_get_current_epsilon_unattached(valid_privacy_config: PrivacyConfig) -> None:
     # Test line 96: if self._optimizer is None
-    guard = PrivacyGuard(valid_privacy_config)
+    guard = PrivacyGuard(valid_privacy_config, user_context=valid_user_context)
     assert guard.get_current_epsilon() == 0.0
+
+
+def test_user_budget_limit_exceeded(
+    simple_model_optimizer_dataloader: Tuple[torch.nn.Module, torch.optim.Optimizer, DataLoader[Any]],
+) -> None:
+    """Test that execution fails if the specific USER privacy budget is exceeded."""
+    # User has low limit (e.g., 0.1), but global target is high (e.g. 10.0)
+    user_context = UserContext(
+        user_id="budget_constrained_user",
+        username="tester",
+        privacy_budget_spent=0.0,
+        privacy_budget_limit=0.0001,  # Very low limit
+    )
+
+    config = PrivacyConfig(
+        mechanism="DP_SGD",
+        noise_multiplier=1.0,
+        max_grad_norm=1.0,
+        target_epsilon=10.0,
+    )
+
+    guard = PrivacyGuard(config, user_context=user_context)
+    model, optimizer, dataloader = simple_model_optimizer_dataloader
+    p_model, p_optimizer, p_dataloader = guard.attach(model, optimizer, dataloader)
+
+    # Take a step
+    batch = next(iter(p_dataloader))
+    inputs, targets = batch
+    p_optimizer.zero_grad()
+    outputs = p_model(inputs)
+    loss = torch.nn.functional.mse_loss(outputs, targets)
+    cast(Any, loss).backward()
+    p_optimizer.step()
+
+    # Check budget should fail due to USER limit
+    with pytest.raises(PrivacyBudgetExceededError) as excinfo:
+        guard.check_budget(delta=1e-5)
+
+    assert "User privacy budget exceeded" in str(excinfo.value)
