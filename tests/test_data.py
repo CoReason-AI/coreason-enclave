@@ -13,9 +13,14 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 import torch
+from coreason_identity.models import UserContext
 
 from coreason_enclave.data.loader import DataLoaderFactory
 from coreason_enclave.sentry import DataSentry
+
+valid_user_context = UserContext(
+    user_id="test_user", username="tester", privacy_budget_spent=0.0, privacy_budget_limit=10.0
+)
 
 
 @pytest.fixture
@@ -38,7 +43,7 @@ def test_load_tensor_success(loader_factory: DataLoaderFactory, tmp_path: Path) 
     torch.save((features, labels), file_path)
 
     with patch.dict("os.environ", {"COREASON_DATA_ROOT": str(tmp_path)}):
-        loader = loader_factory.get_loader("data.pt", batch_size=2)
+        loader = loader_factory.get_loader("data.pt", user_context=valid_user_context, batch_size=2)
 
         batch = next(iter(loader))
         assert len(batch) == 2
@@ -55,7 +60,7 @@ def test_load_csv_success(loader_factory: DataLoaderFactory, tmp_path: Path) -> 
     df.to_csv(file_path, index=False)
 
     with patch.dict("os.environ", {"COREASON_DATA_ROOT": str(tmp_path)}):
-        loader = loader_factory.get_loader("data.csv", batch_size=1)
+        loader = loader_factory.get_loader("data.csv", user_context=valid_user_context, batch_size=1)
 
         batch = next(iter(loader))
         assert batch[0].shape == (1, 2)
@@ -65,7 +70,7 @@ def test_load_csv_success(loader_factory: DataLoaderFactory, tmp_path: Path) -> 
 def test_validation_failure(loader_factory: DataLoaderFactory) -> None:
     loader_factory.sentry.validate_input.return_value = False  # type: ignore
     with pytest.raises(ValueError, match="Input validation failed"):
-        loader_factory.get_loader("bad_data.pt")
+        loader_factory.get_loader("bad_data.pt", user_context=valid_user_context)
 
 
 def test_unsupported_format(loader_factory: DataLoaderFactory, tmp_path: Path) -> None:
@@ -74,4 +79,4 @@ def test_unsupported_format(loader_factory: DataLoaderFactory, tmp_path: Path) -
 
     with patch.dict("os.environ", {"COREASON_DATA_ROOT": str(tmp_path)}):
         with pytest.raises(ValueError, match="Unsupported file format"):
-            loader_factory.get_loader("data.txt")
+            loader_factory.get_loader("data.txt", user_context=valid_user_context)

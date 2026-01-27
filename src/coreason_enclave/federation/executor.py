@@ -27,12 +27,12 @@ if sys.platform == "win32":  # pragma: no cover
     except ImportError:
         sys.modules["resource"] = MagicMock()
 
+from coreason_identity.exceptions import IdentityVerificationError
 from nvflare.apis.executor import Executor
 from nvflare.apis.fl_context import FLContext
 from nvflare.apis.shareable import ReturnCode, Shareable, make_reply
 from nvflare.apis.signal import Signal
 
-from coreason_identity.exceptions import IdentityVerificationError
 from coreason_enclave.privacy import PrivacyBudgetExceededError
 from coreason_enclave.services import CoreasonEnclaveService
 from coreason_enclave.utils.logger import logger

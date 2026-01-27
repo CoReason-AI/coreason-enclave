@@ -18,9 +18,8 @@ from enum import Enum
 from typing import List, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field, field_validator, model_validator
-
 from coreason_identity.models import UserContext
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class AggregationStrategy(str, Enum):

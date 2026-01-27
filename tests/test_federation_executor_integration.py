@@ -36,6 +36,12 @@ class TestCoreasonExecutorSecurity:
             "model_arch": "SimpleMLP",
             "strategy": "FED_AVG",
             "privacy": {"mechanism": "DP_SGD", "noise_multiplier": 10.0, "max_grad_norm": 1.0, "target_epsilon": 100.0},
+            "user_context": {
+                "user_id": "u1",
+                "username": "user1",
+                "privacy_budget_spent": 0.0,
+                "privacy_budget_limit": 10.0,
+            },
         }
 
     @pytest.fixture

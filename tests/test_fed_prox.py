@@ -14,6 +14,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 import torch
+from coreason_identity.models import UserContext
 from nvflare.apis.fl_context import FLContext
 from nvflare.apis.shareable import ReturnCode, Shareable
 from nvflare.apis.signal import Signal
@@ -22,6 +23,10 @@ from torch.utils.data import DataLoader
 from coreason_enclave.federation.executor import CoreasonExecutor
 from coreason_enclave.models.simple_mlp import SimpleMLP
 from coreason_enclave.schemas import FederationJob
+
+valid_user_context = UserContext(
+    user_id="test_user", username="tester", privacy_budget_spent=0.0, privacy_budget_limit=10.0
+)
 
 
 class TestFedProxIntegration:
@@ -178,18 +183,18 @@ class TestFedProxIntegration:
     ) -> None:
         """Test that proximal_mu defaults correctly and can be overridden."""
         # 1. Default
-        job = FederationJob(**basic_job_config)
+        job = FederationJob(user_context=valid_user_context, **basic_job_config)
         assert job.proximal_mu == 0.01
 
         # 2. Override
         basic_job_config["proximal_mu"] = 0.5
-        job = FederationJob(**basic_job_config)
+        job = FederationJob(user_context=valid_user_context, **basic_job_config)
         assert job.proximal_mu == 0.5
 
         # 3. Invalid
         basic_job_config["proximal_mu"] = -0.1
         with pytest.raises(ValueError, match="non-negative"):
-            FederationJob(**basic_job_config)
+            FederationJob(user_context=valid_user_context, **basic_job_config)
 
     def test_fed_prox_mu_zero(
         self, executor: CoreasonExecutor, basic_job_config: Dict[str, Any], mock_data_loader: DataLoader[Any]

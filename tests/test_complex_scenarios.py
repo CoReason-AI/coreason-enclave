@@ -15,6 +15,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 import torch
+from coreason_identity.models import UserContext
 from nvflare.apis.fl_context import FLContext
 from nvflare.apis.shareable import ReturnCode, Shareable
 from nvflare.apis.signal import Signal
@@ -22,6 +23,10 @@ from torch.utils.data import DataLoader, TensorDataset
 
 from coreason_enclave.federation.executor import CoreasonExecutor
 from coreason_enclave.schemas import AttestationReport
+
+valid_user_context = UserContext(
+    user_id="test_user", username="tester", privacy_budget_spent=0.0, privacy_budget_limit=10.0
+)
 
 
 class TestComplexScenarios:

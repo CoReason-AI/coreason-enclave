@@ -19,10 +19,10 @@ import os
 from pathlib import Path
 
 import torch
+from coreason_identity.exceptions import IdentityVerificationError
+from coreason_identity.models import UserContext
 from torch.utils.data import DataLoader, TensorDataset
 
-from coreason_identity.models import UserContext
-from coreason_identity.exceptions import IdentityVerificationError
 from coreason_enclave.sentry import DataSentry
 from coreason_enclave.utils.logger import logger
 
@@ -43,9 +43,7 @@ class DataLoaderFactory:
         """
         self.sentry = sentry
 
-    def get_loader(
-        self, dataset_id: str, user_context: UserContext, batch_size: int = 32
-    ) -> DataLoader:
+    def get_loader(self, dataset_id: str, user_context: UserContext, batch_size: int = 32) -> DataLoader:
         """
         Load data and return a PyTorch DataLoader.
 

@@ -18,10 +18,10 @@ including gradient clipping, noise injection, and strict privacy budget (epsilon
 from typing import Any, Tuple, cast
 
 import torch
+from coreason_identity.models import UserContext
 from opacus import PrivacyEngine
 from torch.utils.data import DataLoader
 
-from coreason_identity.models import UserContext
 from coreason_enclave.schemas import PrivacyConfig
 from coreason_enclave.utils.logger import logger
 
