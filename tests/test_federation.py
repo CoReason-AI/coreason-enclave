@@ -25,6 +25,23 @@ from coreason_enclave.schemas import AttestationReport
 
 
 class TestCoreasonExecutor:
+    def test_execute_missing_context(
+        self,
+        executor: CoreasonExecutor,
+        mock_fl_ctx: MagicMock,
+        mock_signal: MagicMock,
+    ) -> None:
+        """Test execution fails when context is missing."""
+        executor_module._CURRENT_CONTEXT = None
+        shareable = Shareable()
+
+        # Mock logger to verify error logging
+        with patch("coreason_enclave.federation.executor.logger") as mock_logger:
+            result = executor.execute("train_task", shareable, mock_fl_ctx, mock_signal)
+
+            assert result.get_return_code() == ReturnCode.EXECUTION_EXCEPTION
+            mock_logger.error.assert_called_with("Identity Context missing. Cannot execute task.")
+
     @pytest.fixture
     def context(self) -> UserContext:
         return UserContext(

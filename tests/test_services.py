@@ -72,6 +72,38 @@ class TestCoreasonEnclaveServiceAsync:
         with pytest.raises(RuntimeError):
             await service.execute_training_task(shareable, Signal(), context=context)
 
+    async def test_train_model_no_context(
+        self, service: CoreasonEnclaveServiceAsync
+    ) -> None:
+        """Test train_model validation."""
+        dummy_job = FederationJob(
+            job_id="00000000-0000-0000-0000-000000000000", clients=["c"], min_clients=1, rounds=1,
+            dataset_id="d", model_arch="m", strategy="FED_AVG",
+            privacy=PrivacyConfig(noise_multiplier=1.0, max_grad_norm=1.0, target_epsilon=10.0)
+        )
+        with pytest.raises(ValueError, match="UserContext is required"):
+            await service.train_model(None, dummy_job, {}, None, Signal())  # type: ignore
+
+    async def test_evaluate_model(
+        self, service: CoreasonEnclaveServiceAsync, context: UserContext
+    ) -> None:
+        """Test evaluate_model logic (stub)."""
+        dummy_job = FederationJob(
+            job_id="00000000-0000-0000-0000-000000000000", clients=["c"], min_clients=1, rounds=1,
+            dataset_id="d", model_arch="m", strategy="FED_AVG",
+            privacy=PrivacyConfig(noise_multiplier=1.0, max_grad_norm=1.0, target_epsilon=10.0)
+        )
+
+        result = await service.evaluate_model(context, dummy_job, {}, Signal())
+        assert result == {}  # Stub returns empty dict
+
+    async def test_evaluate_model_no_context(
+        self, service: CoreasonEnclaveServiceAsync
+    ) -> None:
+        """Test evaluate_model validation."""
+        with pytest.raises(ValueError, match="UserContext is required"):
+            await service.evaluate_model(None, MagicMock(), {}, Signal())  # type: ignore
+
 
 class TestCoreasonEnclaveService:
     @pytest.fixture
@@ -91,6 +123,8 @@ class TestCoreasonEnclaveService:
             mock_async_instance.__aenter__ = AsyncMock(return_value=mock_async_instance)
             mock_async_instance.__aexit__ = AsyncMock(return_value=None)
             mock_async_instance.execute_training_task = AsyncMock(return_value={"params": {}})
+            mock_async_instance.train_model = AsyncMock(return_value={"train": True})
+            mock_async_instance.evaluate_model = AsyncMock(return_value={"eval": True})
 
             service = CoreasonEnclaveService()
 
@@ -99,11 +133,24 @@ class TestCoreasonEnclaveService:
                 shareable = Shareable()
                 signal = Signal()
                 result = service.execute_training_task(shareable, signal, context=context)
-
                 assert result == {"params": {}}
+
+                # Test explicit train_model call via sync facade
+                res_train = service.train_model(context, MagicMock(), {}, shareable, signal)
+                assert res_train == {"train": True}
+
+                # Test explicit evaluate_model call via sync facade
+                res_eval = service.evaluate_model(context, MagicMock(), {}, signal)
+                assert res_eval == {"eval": True}
 
     def test_service_outside_context(self, context: UserContext) -> None:
         """Test that using service outside context manager raises RuntimeError."""
         service = CoreasonEnclaveService()
         with pytest.raises(RuntimeError, match="Service used outside of context manager"):
             service.execute_training_task(Shareable(), Signal(), context=context)
+
+        with pytest.raises(RuntimeError, match="Service used outside of context manager"):
+            service.train_model(context, MagicMock(), {}, None, Signal())
+
+        with pytest.raises(RuntimeError, match="Service used outside of context manager"):
+            service.evaluate_model(context, MagicMock(), {}, Signal())
