@@ -15,8 +15,8 @@ from coreason_identity.models import UserContext
 from nvflare.apis.shareable import Shareable
 from nvflare.apis.signal import Signal
 
-from coreason_enclave.services import CoreasonEnclaveService, CoreasonEnclaveServiceAsync
 from coreason_enclave.schemas import AggregationStrategy, FederationJob, PrivacyConfig
+from coreason_enclave.services import CoreasonEnclaveService, CoreasonEnclaveServiceAsync
 
 
 @pytest.mark.asyncio

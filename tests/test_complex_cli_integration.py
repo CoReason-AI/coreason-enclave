@@ -68,6 +68,4 @@ def test_main_missing_client_train_module() -> None:
                 main(test_args)
 
                 # Should log warning in executor
-                mock_logger.warning.assert_called_with(
-                    "NVFlare ClientTrain module not found. Skipping execution."
-                )
+                mock_logger.warning.assert_called_with("NVFlare ClientTrain module not found. Skipping execution.")

@@ -14,14 +14,14 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 import torch
+from coreason_identity.models import UserContext
 from nvflare.apis.fl_context import FLContext
 from nvflare.apis.shareable import ReturnCode, Shareable
 from nvflare.apis.signal import Signal
 from torch.utils.data import DataLoader
 
-from coreason_identity.models import UserContext
-from coreason_enclave.federation.executor import CoreasonExecutor
 from coreason_enclave.federation import executor as executor_module
+from coreason_enclave.federation.executor import CoreasonExecutor
 from coreason_enclave.models.simple_mlp import SimpleMLP
 from coreason_enclave.schemas import FederationJob
 

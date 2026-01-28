@@ -13,13 +13,13 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 import torch
+from coreason_identity.models import UserContext
 from nvflare.apis.fl_context import FLContext
 from nvflare.apis.shareable import ReturnCode, Shareable
 from nvflare.apis.signal import Signal
 
-from coreason_identity.models import UserContext
-from coreason_enclave.federation.executor import CoreasonExecutor
 from coreason_enclave.federation import executor as executor_module
+from coreason_enclave.federation.executor import CoreasonExecutor
 from coreason_enclave.schemas import AggregationStrategy, FederationJob, PrivacyConfig
 
 
