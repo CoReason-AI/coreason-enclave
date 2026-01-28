@@ -15,6 +15,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 import torch
+from coreason_identity.models import UserContext
 
 from coreason_enclave.data.loader import DataLoaderFactory
 from coreason_enclave.main import main
@@ -22,6 +23,11 @@ from coreason_enclave.models.registry import ModelRegistry
 from coreason_enclave.sentry import DataSentry
 
 # --- Loader Tests ---
+
+
+valid_user_context = UserContext(
+    user_id="test_user", username="tester", privacy_budget_spent=0.0, privacy_budget_limit=10.0
+)
 
 
 def test_loader_tensor_load_fail(tmp_path: Path) -> None:
@@ -37,7 +43,7 @@ def test_loader_tensor_load_fail(tmp_path: Path) -> None:
     with patch.dict("os.environ", {"COREASON_DATA_ROOT": str(tmp_path)}):
         # pickle.UnpicklingError for weights_only=True default in newer torch
         with pytest.raises((RuntimeError, pickle.UnpicklingError)):
-            factory.get_loader("bad.pt")
+            factory.get_loader("bad.pt", user_context=valid_user_context)
 
 
 def test_loader_tensor_invalid_format(tmp_path: Path) -> None:
@@ -51,7 +57,7 @@ def test_loader_tensor_invalid_format(tmp_path: Path) -> None:
 
     with patch.dict("os.environ", {"COREASON_DATA_ROOT": str(tmp_path)}):
         with pytest.raises(ValueError, match="Tensor file must contain"):
-            factory.get_loader("structure.pt")
+            factory.get_loader("structure.pt", user_context=valid_user_context)
 
 
 def test_loader_csv_import_error(tmp_path: Path) -> None:
@@ -81,7 +87,7 @@ def test_loader_csv_load_fail(tmp_path: Path) -> None:
         # Mock pandas read_csv to raise
         with patch("pandas.read_csv", side_effect=Exception("CSV Error")):
             with pytest.raises(Exception, match="CSV Error"):
-                factory.get_loader("bad.csv")
+                factory.get_loader("bad.csv", user_context=valid_user_context)
 
 
 # --- Main Tests ---
@@ -99,17 +105,15 @@ def test_main_exception_handling() -> None:
 
 def test_main_opts() -> None:
     """Test main with additional opts."""
-    # We must mock client_train because main now calls it, and it will fail on dummy opts
-    with patch("coreason_enclave.main.client_train") as mock_ct:
+    # We must mock start_client because main now calls it
+    with patch("coreason_enclave.main.start_client") as mock_start_client:
         with patch("coreason_enclave.main.logger"):
-            # We mock parse_arguments to succeed
-            mock_ct.parse_arguments.return_value = MagicMock()
-
             main(["-w", "w", "-c", "c", "opt1", "opt2"])
 
-            # Verify opts were passed to sys.argv (implicitly tested by logic, but we can assume success if no crash)
-            mock_ct.parse_arguments.assert_called_once()
-            mock_ct.main.assert_called_once()
+            # Verify call
+            mock_start_client.assert_called_once()
+            _, kwargs = mock_start_client.call_args
+            assert kwargs["opts"] == ["opt1", "opt2"]
 
 
 def test_loader_tensor_dict_success(tmp_path: Path) -> None:
@@ -124,7 +128,7 @@ def test_loader_tensor_dict_success(tmp_path: Path) -> None:
     factory = DataLoaderFactory(sentry)
 
     with patch.dict("os.environ", {"COREASON_DATA_ROOT": str(tmp_path)}):
-        loader = factory.get_loader("dict.pt", batch_size=2)
+        loader = factory.get_loader("dict.pt", user_context=valid_user_context, batch_size=2)
         assert len(loader.dataset) == 5
 
 

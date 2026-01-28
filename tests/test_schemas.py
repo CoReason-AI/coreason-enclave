@@ -11,6 +11,7 @@
 from uuid import uuid4
 
 import pytest
+from coreason_identity.models import UserContext
 from pydantic import ValidationError
 
 from coreason_enclave.schemas import (
@@ -21,6 +22,11 @@ from coreason_enclave.schemas import (
 )
 
 # --- PrivacyConfig Tests ---
+
+
+valid_user_context = UserContext(
+    user_id="test_user", username="tester", privacy_budget_spent=0.0, privacy_budget_limit=10.0
+)
 
 
 def test_privacy_config_valid() -> None:
@@ -63,6 +69,7 @@ def test_privacy_config_invalid_epsilon() -> None:
 
 def test_federation_job_valid() -> None:
     job = FederationJob(
+        user_context=valid_user_context,
         job_id=uuid4(),
         clients=["node_a", "node_b"],
         min_clients=2,
@@ -81,6 +88,7 @@ def test_federation_job_valid() -> None:
 def test_federation_job_empty_dataset_id() -> None:
     with pytest.raises(ValidationError, match="dataset_id cannot be empty"):
         FederationJob(
+            user_context=valid_user_context,
             job_id=uuid4(),
             clients=["node_a"],
             min_clients=1,
@@ -95,6 +103,7 @@ def test_federation_job_empty_dataset_id() -> None:
 def test_federation_job_empty_model_arch() -> None:
     with pytest.raises(ValidationError, match="model_arch cannot be empty"):
         FederationJob(
+            user_context=valid_user_context,
             job_id=uuid4(),
             clients=["node_a"],
             min_clients=1,
@@ -110,6 +119,7 @@ def test_federation_job_boundaries() -> None:
     """Test boundary conditions for rounds and clients."""
     # Rounds = 1 (Lower bound)
     job_min = FederationJob(
+        user_context=valid_user_context,
         job_id=uuid4(),
         clients=["node_a"],
         min_clients=1,
@@ -123,6 +133,7 @@ def test_federation_job_boundaries() -> None:
 
     # Rounds = 10000 (Upper bound)
     job_max = FederationJob(
+        user_context=valid_user_context,
         job_id=uuid4(),
         clients=["node_a"],
         min_clients=1,
@@ -136,6 +147,7 @@ def test_federation_job_boundaries() -> None:
 
     # Min clients = len(clients) (Upper bound)
     job_clients = FederationJob(
+        user_context=valid_user_context,
         job_id=uuid4(),
         clients=["node_a", "node_b"],
         min_clients=2,
@@ -152,6 +164,7 @@ def test_federation_job_rounds_bounds() -> None:
     # Too low
     with pytest.raises(ValidationError, match="rounds must be between 1 and 10000"):
         FederationJob(
+            user_context=valid_user_context,
             job_id=uuid4(),
             clients=["node_a"],
             min_clients=1,
@@ -165,6 +178,7 @@ def test_federation_job_rounds_bounds() -> None:
     # Too high
     with pytest.raises(ValidationError, match="rounds must be between 1 and 10000"):
         FederationJob(
+            user_context=valid_user_context,
             job_id=uuid4(),
             clients=["node_a"],
             min_clients=1,
@@ -179,6 +193,7 @@ def test_federation_job_rounds_bounds() -> None:
 def test_federation_job_unique_clients() -> None:
     with pytest.raises(ValidationError, match="clients list must contain unique node IDs"):
         FederationJob(
+            user_context=valid_user_context,
             job_id=uuid4(),
             clients=["node_a", "node_a"],  # Duplicate
             min_clients=1,
@@ -194,6 +209,7 @@ def test_federation_job_client_uniqueness_case_sensitivity() -> None:
     """Test that client uniqueness is case-sensitive."""
     # "node_a" and "NODE_A" are different strings, so this should be valid
     job = FederationJob(
+        user_context=valid_user_context,
         job_id=uuid4(),
         clients=["node_a", "NODE_A"],
         min_clients=2,
@@ -210,6 +226,7 @@ def test_federation_job_min_clients_logic() -> None:
     # min_clients > len(clients)
     with pytest.raises(ValidationError, match="min_clients cannot be greater than the number of available clients"):
         FederationJob(
+            user_context=valid_user_context,
             job_id=uuid4(),
             clients=["node_a"],
             min_clients=2,
@@ -223,6 +240,7 @@ def test_federation_job_min_clients_logic() -> None:
     # min_clients < 1
     with pytest.raises(ValidationError, match="min_clients must be at least 1"):
         FederationJob(
+            user_context=valid_user_context,
             job_id=uuid4(),
             clients=["node_a"],
             min_clients=0,

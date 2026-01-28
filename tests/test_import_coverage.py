@@ -31,6 +31,13 @@ def test_main_import_error_handling() -> None:
     module = sys.modules[module_name]
 
     # Mock sys.modules to simulate nvflare being missing during import
+    # This now affects coreason_enclave.federation.executor
+    module_name = "coreason_enclave.federation.executor"
+    if module_name not in sys.modules:
+        importlib.import_module(module_name)
+
+    module = sys.modules[module_name]
+
     with patch.dict(sys.modules, {"nvflare.private.fed.app.client.client_train": None}):
         # Reload the module to trigger the top-level import block again
         importlib.reload(module)

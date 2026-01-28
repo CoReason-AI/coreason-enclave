@@ -11,6 +11,7 @@ import anyio
 import httpx
 import torch
 import torch.optim as optim
+from coreason_identity.models import UserContext
 from nvflare.apis.shareable import Shareable
 from nvflare.apis.signal import Signal
 from torch.utils.data import DataLoader
@@ -168,44 +169,45 @@ class CoreasonEnclaveServiceAsync:
         except Exception as e:
             raise e
 
-    async def execute_training_task(
+    async def train_model(
         self,
-        shareable: Shareable,
+        context: UserContext,
+        job_config: FederationJob,
+        params: Optional[Dict[str, Any]],
+        shareable: Optional[Shareable],
         abort_signal: Signal,
     ) -> Dict[str, Any]:
         """
-        Orchestrate the training workflow asynchronously.
-
-        Returns a dictionary representing the result shareable content (or error).
+        Execute training model logic with identity context.
         """
+        if not context:
+            raise ValueError("UserContext is required for training")
+
+        logger.info(
+            "Enclave Service Request",
+            user_id=context.user_id,
+            operation="train_model",
+            model=job_config.model_arch,
+        )
+
         # 1. Check Hardware Trust
         try:
             await self.check_hardware_trust()
         except RuntimeError as e:
             logger.error(f"Attestation failed: {e}")
-            # If we were returning a Shareable here, we'd need ReturnCode.
-            # But we return a Dict that will be put into a Shareable by the caller.
-            # However, execute_training usually returns a full Shareable or similar structure.
-            # Let's return a dict with status if possible, or raise error.
-            # For simplicity, let's propagate the error or return a specific structure.
-            # The caller (Executor) expects a Shareable.
-            # We will return None or empty dict on failure so caller can handle?
-            # Better: raise exception for control flow, catch in wrapper.
             raise e
-
-        # 2. Parse Config
-        job_config = self._parse_job_config(shareable)
-        if not job_config:
-            raise ValueError("Invalid job configuration")
 
         # 3. Load Resources & Initialize
         try:
             dataset_id = job_config.dataset_id
             model_arch = job_config.model_arch
+            user_context = job_config.user_context
 
             # Data Loading (Sync IO, might be heavy)
             # running in thread to avoid blocking loop
-            train_loader = await anyio.to_thread.run_sync(self.data_loader_factory.get_loader, dataset_id, 32)
+            train_loader = await anyio.to_thread.run_sync(
+                self.data_loader_factory.get_loader, dataset_id, user_context, 32
+            )
 
             # Model Instantiation
             model_cls = ModelRegistry.get(model_arch)
@@ -215,7 +217,7 @@ class CoreasonEnclaveServiceAsync:
             strategy = self._get_strategy(job_config)
 
             # Params
-            incoming_params = shareable.get("params")
+            incoming_params = params
             if incoming_params:
                 # torch tensor creation is fast enough, but load_state_dict might be heavy for huge models
                 state_dict = {
@@ -225,11 +227,12 @@ class CoreasonEnclaveServiceAsync:
                 logger.info("Loaded incoming params into model")
 
             # Strategy Hook
-            strategy.before_training(model, shareable, job_config)
+            if shareable:
+                strategy.before_training(model, shareable, job_config)
 
             # Privacy & Optimizer
             optimizer = optim.SGD(model.parameters(), lr=DEFAULT_LR)
-            privacy_guard = PrivacyGuard(config=job_config.privacy)
+            privacy_guard = PrivacyGuard(config=job_config.privacy, user_context=user_context)
 
             # Opacus attach might be CPU intensive
             model, optimizer, train_loader = await anyio.to_thread.run_sync(
@@ -288,9 +291,49 @@ class CoreasonEnclaveServiceAsync:
             logger.error(f"Output sanitation failed: {e}")
             raise e
 
-        # Explicit cast or validation could be here if needed, but return type of sanitize_output is Shareable or Dict
-        # Assuming sanitize_output returns Dict
         return dict(sanitized_result)
+
+    async def evaluate_model(
+        self,
+        context: UserContext,
+        job_config: FederationJob,
+        params: Optional[Dict[str, Any]],
+        abort_signal: Signal,
+    ) -> Dict[str, Any]:
+        """
+        Execute evaluation model logic with identity context.
+        """
+        if not context:
+            raise ValueError("UserContext is required for evaluation")
+
+        logger.info(
+            "Enclave Service Request",
+            user_id=context.user_id,
+            operation="evaluate_model",
+            model=job_config.model_arch,
+        )
+        # TODO: Implement evaluation logic
+        logger.warning("Evaluation logic not implemented")
+        return {}
+
+    async def execute_training_task(
+        self,
+        shareable: Shareable,
+        abort_signal: Signal,
+        context: UserContext,
+    ) -> Dict[str, Any]:
+        """
+        Orchestrate the training workflow asynchronously.
+
+        Returns a dictionary representing the result shareable content (or error).
+        """
+        # 1. Parse Config
+        job_config = self._parse_job_config(shareable)
+        if not job_config:
+            raise ValueError("Invalid job configuration")
+
+        # 2. Delegate to train_model (which handles attestation)
+        return await self.train_model(context, job_config, shareable.get("params"), shareable, abort_signal)
 
 
 class CoreasonEnclaveService:
@@ -323,14 +366,38 @@ class CoreasonEnclaveService:
                 self._portal = None
                 self._portal_cm = None
 
+    def train_model(
+        self,
+        context: UserContext,
+        job_config: FederationJob,
+        params: Optional[Dict[str, Any]],
+        shareable: Optional[Shareable],
+        abort_signal: Signal,
+    ) -> Dict[str, Any]:
+        if not self._portal:
+            raise RuntimeError("Service used outside of context manager")
+        return self._portal.call(self._async.train_model, context, job_config, params, shareable, abort_signal)  # type: ignore[no-any-return]
+
+    def evaluate_model(
+        self,
+        context: UserContext,
+        job_config: FederationJob,
+        params: Optional[Dict[str, Any]],
+        abort_signal: Signal,
+    ) -> Dict[str, Any]:
+        if not self._portal:
+            raise RuntimeError("Service used outside of context manager")
+        return self._portal.call(self._async.evaluate_model, context, job_config, params, abort_signal)  # type: ignore[no-any-return]
+
     def execute_training_task(
         self,
         shareable: Shareable,
         abort_signal: Signal,
+        context: UserContext,
     ) -> Dict[str, Any]:
         """
         Execute training task synchronously.
         """
         if not self._portal:
             raise RuntimeError("Service used outside of context manager")
-        return self._portal.call(self._async.execute_training_task, shareable, abort_signal)  # type: ignore[no-any-return]
+        return self._portal.call(self._async.execute_training_task, shareable, abort_signal, context)  # type: ignore[no-any-return]

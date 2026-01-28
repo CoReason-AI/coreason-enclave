@@ -17,6 +17,7 @@ privacy guards, and strategy execution.
 """
 
 import sys
+from typing import List, Optional
 from unittest.mock import MagicMock
 
 # NVFlare 2.7.1 has an issue on Windows where it imports 'resource' (Unix-only).
@@ -27,13 +28,93 @@ if sys.platform == "win32":  # pragma: no cover
     except ImportError:
         sys.modules["resource"] = MagicMock()
 
+try:
+    # Try importing NVFlare client logic
+    import nvflare.private.fed.app.client.client_train as client_train
+except ImportError:
+    # Fallback for environments without nvflare installed
+    client_train = None
+
+from coreason_identity.exceptions import IdentityVerificationError
+from coreason_identity.models import UserContext
 from nvflare.apis.executor import Executor
 from nvflare.apis.fl_context import FLContext
 from nvflare.apis.shareable import ReturnCode, Shareable, make_reply
 from nvflare.apis.signal import Signal
 
+from coreason_enclave.privacy import PrivacyBudgetExceededError
 from coreason_enclave.services import CoreasonEnclaveService
 from coreason_enclave.utils.logger import logger
+
+_CURRENT_CONTEXT: Optional[UserContext] = None
+
+
+def start_client(
+    context: UserContext,
+    workspace: str,
+    conf: str,
+    opts: Optional[List[str]] = None,
+) -> None:
+    """
+    Start the Federation Client with Identity Context.
+    """
+    if not context:
+        raise ValueError("UserContext is required to start client")
+
+    global _CURRENT_CONTEXT
+    _CURRENT_CONTEXT = context
+
+    logger.info(
+        "Initializing Federation Executor",
+        user_id=context.user_id,
+        action="start_client",
+    )
+
+    # Construct NVFlare arguments
+    args = [
+        "coreason_enclave_wrapper",
+        "-m",
+        workspace,
+        "-s",
+        conf,
+    ]
+    if opts:
+        args.extend(opts)
+
+    if client_train:
+        sys_argv_backup = sys.argv
+        try:
+            sys.argv = args
+            fl_args = client_train.parse_arguments()
+            client_train.main(fl_args)
+        finally:
+            sys.argv = sys_argv_backup
+    else:
+        logger.warning("NVFlare ClientTrain module not found. Skipping execution.")
+
+
+def start_server(context: UserContext) -> None:
+    if not context:
+        raise ValueError("UserContext is required")
+    logger.info(
+        "Initializing Federation Executor",
+        user_id=context.user_id,
+        action="start_server",
+    )
+    # Stub implementation as per instructions to just update logic/logging
+    pass
+
+
+def run_federated_training(context: UserContext) -> None:
+    if not context:
+        raise ValueError("UserContext is required")
+    logger.info(
+        "Initializing Federation Executor",
+        user_id=context.user_id,
+        action="run_federated_training",
+    )
+    # Stub implementation
+    pass
 
 
 class CoreasonExecutor(Executor):  # type: ignore[misc]
@@ -101,14 +182,24 @@ class CoreasonExecutor(Executor):  # type: ignore[misc]
         """
         logger.info(f"Received task: {task_name}")
 
+        # Retrieve Context
+        global _CURRENT_CONTEXT
+        context = _CURRENT_CONTEXT
+        if not context:
+            logger.error("Identity Context missing. Cannot execute task.")
+            return make_reply(ReturnCode.EXECUTION_EXCEPTION)
+
         try:
             if task_name == self.training_task_name:
                 try:
-                    result_dict = self.service.execute_training_task(shareable, abort_signal)
+                    result_dict = self.service.execute_training_task(shareable, abort_signal, context=context)
                     # Convert dict to Shareable
                     result = Shareable()
                     result.update(result_dict)
                     return result
+                except (IdentityVerificationError, PrivacyBudgetExceededError) as e:
+                    logger.error(f"Security/Privacy violation: {e}")
+                    return make_reply(ReturnCode.EXECUTION_RESULT_ERROR)
                 except ValueError:
                     return make_reply(ReturnCode.BAD_TASK_DATA)
                 except Exception as e:

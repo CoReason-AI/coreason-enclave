@@ -50,9 +50,9 @@ class TestCLI:
             yield mock
 
     @pytest.fixture
-    def mock_client_train(self) -> Generator[MagicMock, None, None]:
-        # Mock the new import location for client_train
-        with patch("coreason_enclave.main.client_train") as mock:
+    def mock_start_client(self) -> Generator[MagicMock, None, None]:
+        # Mock the new import location for start_client
+        with patch("coreason_enclave.main.start_client") as mock:
             yield mock
 
     def test_apply_security_policy_simulation_flag(self) -> None:
@@ -108,13 +108,13 @@ class TestCLI:
             with pytest.raises(RuntimeError, match="required '--insecure' or '--simulation' CLI flag is missing"):
                 apply_security_policy(simulation_flag=False, insecure_flag=False)
 
-    def test_main_arg_parsing_simulation(self, mock_client_train: MagicMock) -> None:
+    def test_main_arg_parsing_simulation(self, mock_start_client: MagicMock) -> None:
         """Test that main parses --simulation correctly."""
         with patch("coreason_enclave.main.apply_security_policy") as mock_config:
             main(["--workspace", "/tmp", "--conf", "config.json", "--simulation"])
             mock_config.assert_called_once_with(simulation_flag=True, insecure_flag=False)
 
-    def test_main_arg_parsing_insecure(self, mock_client_train: MagicMock) -> None:
+    def test_main_arg_parsing_insecure(self, mock_start_client: MagicMock) -> None:
         """Test that main parses --insecure correctly."""
         with patch("coreason_enclave.main.apply_security_policy") as mock_config:
             main(["--workspace", "/tmp", "--conf", "config.json", "--insecure"])
@@ -130,7 +130,7 @@ class TestCLI:
                 main(["--simulation"])
             assert excinfo.value.code != 0
 
-    def test_end_to_end_simulation_flow(self, mock_client_train: MagicMock) -> None:
+    def test_end_to_end_simulation_flow(self, mock_start_client: MagicMock) -> None:
         """
         Complex Scenario:
         1. Simulate CLI invocation with --simulation.

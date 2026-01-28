@@ -13,6 +13,7 @@ import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
+from coreason_identity.models import UserContext
 
 from coreason_enclave.main import main
 
@@ -30,12 +31,9 @@ class TestMainLogic:
     from typing import Any, Generator
 
     @pytest.fixture
-    def mock_client_train(self) -> Generator[MagicMock, None, None]:
-        """Mock the entire nvflare client_train module."""
-        with patch("coreason_enclave.main.client_train") as mock:
-            # Setup mock for parse_arguments to return a dummy namespace
-            mock_args = MagicMock()
-            mock.parse_arguments.return_value = mock_args
+    def mock_start_client(self) -> Generator[MagicMock, None, None]:
+        """Mock the executor start_client function."""
+        with patch("coreason_enclave.main.start_client") as mock:
             yield mock
 
     @pytest.fixture
@@ -43,7 +41,7 @@ class TestMainLogic:
         with patch("sys.exit") as mock:
             yield mock
 
-    def test_main_secure_default(self, mock_client_train: MagicMock, mock_sys_exit: Any) -> None:
+    def test_main_secure_default(self, mock_start_client: MagicMock, mock_sys_exit: Any) -> None:
         """Test main runs in secure mode by default."""
         test_args = ["-w", "/tmp/ws", "-c", "conf.json"]
 
@@ -51,11 +49,14 @@ class TestMainLogic:
             main(test_args)
 
             assert os.environ["COREASON_ENCLAVE_SIMULATION"] == "false"
-            # Verify NVFlare invoked
-            mock_client_train.parse_arguments.assert_called_once()
-            mock_client_train.main.assert_called_once()
+            # Verify Executor invoked
+            mock_start_client.assert_called_once()
+            call_kwargs = mock_start_client.call_args[1]
+            assert call_kwargs["workspace"] == "/tmp/ws"
+            assert call_kwargs["conf"] == "conf.json"
+            assert isinstance(call_kwargs["context"], UserContext)
 
-    def test_main_insecure_mode(self, mock_client_train: MagicMock, mock_sys_exit: Any) -> None:
+    def test_main_insecure_mode(self, mock_start_client: MagicMock, mock_sys_exit: Any) -> None:
         """Test main runs in simulation mode with flag."""
         test_args = ["-w", "/tmp/ws", "-c", "conf.json", "--insecure"]
 
@@ -63,9 +64,9 @@ class TestMainLogic:
             main(test_args)
 
             assert os.environ["COREASON_ENCLAVE_SIMULATION"] == "true"
-            mock_client_train.main.assert_called_once()
+            mock_start_client.assert_called_once()
 
-    def test_main_simulation_mode(self, mock_client_train: MagicMock, mock_sys_exit: Any) -> None:
+    def test_main_simulation_mode(self, mock_start_client: MagicMock, mock_sys_exit: Any) -> None:
         """Test main runs in simulation mode with --simulation flag."""
         test_args = ["-w", "/tmp/ws", "-c", "conf.json", "--simulation"]
 
@@ -73,9 +74,9 @@ class TestMainLogic:
             main(test_args)
 
             assert os.environ["COREASON_ENCLAVE_SIMULATION"] == "true"
-            mock_client_train.main.assert_called_once()
+            mock_start_client.assert_called_once()
 
-    def test_main_aborts_on_env_mismatch(self, mock_client_train: MagicMock, mock_sys_exit: Any) -> None:
+    def test_main_aborts_on_env_mismatch(self, mock_start_client: MagicMock, mock_sys_exit: Any) -> None:
         """Test abort if env=true but flag missing."""
         test_args = ["-w", "/tmp/ws", "-c", "conf.json"]
 
@@ -92,34 +93,7 @@ class TestMainLogic:
                 assert "Security Violation" in args[0]
                 assert "required '--insecure' or '--simulation' CLI flag is missing" in args[0]
 
-    def test_main_nvflare_args_construction(self, mock_client_train: MagicMock, mock_sys_exit: Any) -> None:
-        """Test that arguments are correctly mapped to NVFlare format."""
-        test_args = ["-w", "/my/workspace", "-c", "my_config.json", "--simulation"]
-
-        with patch.dict(os.environ, {}, clear=True):
-            # We need to spy on sys.argv assignment, or simpler:
-            # Verify parse_arguments was called when sys.argv was set correctly.
-            # But parse_arguments reads sys.argv directly.
-
-            # So we check what parse_arguments returns? No, that's mocked.
-            # We check what sys.argv WAS when parse_arguments was called.
-
-            main(test_args)
-
-            # Since sys.argv is restored, we can't check it now.
-            # But we can check that parse_arguments was called.
-            mock_client_train.parse_arguments.assert_called_once()
-
-            # To strictly verify argv passed to NVFlare, we'd need to mock sys.argv inside main
-            # or spy on the assignment.
-            # Given implementation details:
-            # sys.argv = ["coreason_enclave_wrapper", "-m", "/my/workspace", "-s", "my_config.json"]
-
-            # We can't easily assert the STATE of sys.argv during the call without side-effect spying.
-            # But we trust the unit test of _build_nvflare_args if we had one.
-            pass
-
-    def test_insecure_flag_overrides_garbage_env(self, mock_client_train: MagicMock, mock_sys_exit: Any) -> None:
+    def test_insecure_flag_overrides_garbage_env(self, mock_start_client: MagicMock, mock_sys_exit: Any) -> None:
         """Test that --insecure flag overrides a garbage env var."""
         test_args = ["-w", "/tmp/ws", "-c", "conf.json", "--insecure"]
 

@@ -12,17 +12,23 @@ from typing import Dict
 
 import pytest
 import torch
+from coreason_identity.models import UserContext
 from nvflare.apis.shareable import Shareable
 
 from coreason_enclave.federation.executor import CoreasonExecutor
 from coreason_enclave.federation.strategies import FedProxStrategy, ScaffoldStrategy
 from coreason_enclave.schemas import AggregationStrategy, FederationJob, PrivacyConfig
 
+valid_user_context = UserContext(
+    user_id="test_user", username="tester", privacy_budget_spent=0.0, privacy_budget_limit=10.0
+)
+
 
 class TestStrategies:
     @pytest.fixture
     def basic_job_config(self) -> FederationJob:
         return FederationJob(
+            user_context=valid_user_context,
             job_id="00000000-0000-0000-0000-000000000000",
             clients=["client1"],
             min_clients=1,
