@@ -14,6 +14,7 @@ import pytest
 from nvflare.apis.shareable import Shareable
 from nvflare.apis.signal import Signal
 
+from coreason_identity.models import UserContext
 from coreason_enclave.services import CoreasonEnclaveService, CoreasonEnclaveServiceAsync
 
 
@@ -23,6 +24,15 @@ class TestCoreasonEnclaveServiceAsync:
     def service(self) -> CoreasonEnclaveServiceAsync:
         svc = CoreasonEnclaveServiceAsync()
         return svc
+
+    @pytest.fixture
+    def context(self) -> UserContext:
+        return UserContext(
+            sub="test-user",
+            email="test@coreason.ai",
+            permissions=[],
+            project_context="test",
+        )
 
     async def test_lifecycle(self) -> None:
         async with CoreasonEnclaveServiceAsync() as svc:
@@ -38,16 +48,27 @@ class TestCoreasonEnclaveServiceAsync:
 
         service.attestation_provider.attest.assert_called_once()
 
-    async def test_execute_training_task_attestation_failure(self, service: CoreasonEnclaveServiceAsync) -> None:
+    async def test_execute_training_task_attestation_failure(
+        self, service: CoreasonEnclaveServiceAsync, context: UserContext
+    ) -> None:
         service.attestation_provider = MagicMock()
         service.attestation_provider.attest.return_value.status = "UNTRUSTED"
 
         with pytest.raises(RuntimeError):
-            await service.execute_training_task(Shareable(), Signal())
+            await service.execute_training_task(Shareable(), Signal(), context=context)
 
 
 class TestCoreasonEnclaveService:
-    def test_sync_facade_training(self) -> None:
+    @pytest.fixture
+    def context(self) -> UserContext:
+        return UserContext(
+            sub="test-user",
+            email="test@coreason.ai",
+            permissions=[],
+            project_context="test",
+        )
+
+    def test_sync_facade_training(self, context: UserContext) -> None:
         # Mocking the async service inside the sync facade
         with patch("coreason_enclave.services.CoreasonEnclaveServiceAsync") as MockAsyncService:
             # Setup mock
@@ -62,12 +83,12 @@ class TestCoreasonEnclaveService:
                 # Mock call
                 shareable = Shareable()
                 signal = Signal()
-                result = service.execute_training_task(shareable, signal)
+                result = service.execute_training_task(shareable, signal, context=context)
 
                 assert result == {"params": {}}
 
-    def test_service_outside_context(self) -> None:
+    def test_service_outside_context(self, context: UserContext) -> None:
         """Test that using service outside context manager raises RuntimeError."""
         service = CoreasonEnclaveService()
         with pytest.raises(RuntimeError, match="Service used outside of context manager"):
-            service.execute_training_task(Shareable(), Signal())
+            service.execute_training_task(Shareable(), Signal(), context=context)

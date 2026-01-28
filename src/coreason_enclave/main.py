@@ -29,14 +29,8 @@ if sys.platform == "win32":  # pragma: no cover
     except ImportError:
         sys.modules["resource"] = MagicMock()
 
-try:
-    # Try importing NVFlare client logic
-    import nvflare.private.fed.app.client.client_train as client_train
-except ImportError:
-    # Fallback for environments without nvflare installed (e.g. specialized test envs)
-    # or if the internal path changes.
-    client_train = None
-
+from coreason_identity.models import UserContext
+from coreason_enclave.federation.executor import start_client
 from coreason_enclave.utils.logger import logger
 
 
@@ -76,44 +70,6 @@ def apply_security_policy(simulation_flag: bool, insecure_flag: bool) -> None:
         # Force secure mode to prevent accidental insecurity from lower layers
         os.environ["COREASON_ENCLAVE_SIMULATION"] = "false"
         logger.info("Running in SECURE HARDWARE MODE. TEE Attestation required.")
-
-
-def _build_nvflare_args(parsed_args: argparse.Namespace) -> List[str]:
-    """
-    Construct the argument list for NVFlare ClientTrain.
-
-    Translates coreason-enclave arguments to the format expected by NVFlare.
-
-    Args:
-        parsed_args (argparse.Namespace): The arguments parsed by coreason-enclave.
-
-    Returns:
-        List[str]: The argument list for nvflare.
-    """
-    # NVFlare client_train.py expects:
-    # --workspace (-m) <workspace>
-    # --fed_client (-s) <client config file>
-    # --set KEY=VALUE ...
-    # --local_rank <int>
-
-    # coreason-enclave args: -w/--workspace, -c/--conf
-    # Mapping:
-    # -w -> -m (workspace)
-    # -c -> -s (fed_client / config)
-
-    args = [
-        "coreason_enclave_wrapper",  # Prog name for argv[0]
-        "-m",
-        parsed_args.workspace,
-        "-s",
-        parsed_args.conf,
-    ]
-
-    # Pass through other options if they match NVFlare structure
-    if parsed_args.opts:
-        args.extend(parsed_args.opts)
-
-    return args
 
 
 def main(args: Optional[list[str]] = None) -> None:
@@ -157,25 +113,21 @@ def main(args: Optional[list[str]] = None) -> None:
         logger.info(f"Workspace: {parsed_args.workspace}")
         logger.info(f"Config: {parsed_args.conf}")
 
-        # 2. Construct NVFlare arguments
-        nvflare_argv = _build_nvflare_args(parsed_args)
+        # 2. Create System Context
+        system_context = UserContext(
+            sub="cli-user",
+            email="cli@coreason.ai",
+            permissions=["system"],
+            project_context="cli",
+        )
 
-        # 3. Invoke NVFlare Client
-        if client_train:
-            logger.info("Invoking NVFlare ClientTrain...")
-
-            # We must manipulate sys.argv because client_train.parse_arguments() reads it directly.
-            sys_argv_backup = sys.argv
-            try:
-                sys.argv = nvflare_argv
-                # Parse args using NVFlare's parser
-                fl_args = client_train.parse_arguments()
-                # Run main logic with parsed args
-                client_train.main(fl_args)
-            finally:
-                sys.argv = sys_argv_backup
-        else:
-            logger.warning("NVFlare ClientTrain module not found. Skipping execution (Dry Run).")
+        # 3. Invoke Executor
+        start_client(
+            context=system_context,
+            workspace=parsed_args.workspace,
+            conf=parsed_args.conf,
+            opts=parsed_args.opts,
+        )
 
     except Exception as e:
         logger.exception(f"Failed to start Enclave Agent: {e}")

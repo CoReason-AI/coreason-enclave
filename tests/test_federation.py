@@ -18,11 +18,21 @@ from nvflare.apis.fl_context import FLContext
 from nvflare.apis.shareable import ReturnCode, Shareable
 from nvflare.apis.signal import Signal
 
+from coreason_identity.models import UserContext
 from coreason_enclave.federation.executor import CoreasonExecutor
+from coreason_enclave.federation import executor as executor_module
 from coreason_enclave.schemas import AttestationReport
 
 
 class TestCoreasonExecutor:
+    @pytest.fixture
+    def context(self) -> UserContext:
+        return UserContext(
+            sub="test-user",
+            email="test@coreason.ai",
+            permissions=[],
+            project_context="test",
+        )
     @pytest.fixture
     def mock_attestation_provider(self) -> Generator[MagicMock, None, None]:
         # get_attestation_provider moved to services.py, so we mock it there if needed,
@@ -85,8 +95,10 @@ class TestCoreasonExecutor:
         executor: CoreasonExecutor,
         mock_fl_ctx: MagicMock,
         mock_signal: MagicMock,
+        context: UserContext,
     ) -> None:
         """Test execution with an unknown task name."""
+        executor_module._CURRENT_CONTEXT = context
         shareable = Shareable()
         result = executor.execute("unknown_task", shareable, mock_fl_ctx, mock_signal)
         assert isinstance(result, Shareable)
@@ -98,8 +110,10 @@ class TestCoreasonExecutor:
         mock_fl_ctx: MagicMock,
         mock_signal: MagicMock,
         valid_job_config: Dict[str, Any],
+        context: UserContext,
     ) -> None:
         """Test execution with the training task name."""
+        executor_module._CURRENT_CONTEXT = context
         shareable = Shareable()
         shareable.set_header("job_config", json.dumps(valid_job_config))
 
@@ -110,7 +124,9 @@ class TestCoreasonExecutor:
 
         result = executor.execute("train_task", shareable, mock_fl_ctx, mock_signal)
 
-        executor.service.execute_training_task.assert_called_once()
+        executor.service.execute_training_task.assert_called_once_with(
+            shareable, mock_signal, context=context
+        )
         assert isinstance(result, Shareable)
         assert result.get_return_code() == ReturnCode.OK
 
@@ -120,8 +136,10 @@ class TestCoreasonExecutor:
         mock_fl_ctx: MagicMock,
         mock_signal: MagicMock,
         valid_job_config: Dict[str, Any],
+        context: UserContext,
     ) -> None:
         """Test that execution respects the abort signal."""
+        executor_module._CURRENT_CONTEXT = context
         mock_signal.triggered = True
         shareable = Shareable()
         shareable.set_header("job_config", json.dumps(valid_job_config))
@@ -140,8 +158,10 @@ class TestCoreasonExecutor:
         executor: CoreasonExecutor,
         mock_fl_ctx: MagicMock,
         mock_signal: MagicMock,
+        context: UserContext,
     ) -> None:
         """Test that exceptions during execution are caught and handled."""
+        executor_module._CURRENT_CONTEXT = context
         shareable = Shareable()
         # Mock service to raise exception
         executor.service = MagicMock()
@@ -156,8 +176,10 @@ class TestCoreasonExecutor:
         executor: CoreasonExecutor,
         mock_fl_ctx: MagicMock,
         mock_signal: MagicMock,
+        context: UserContext,
     ) -> None:
         """Test execution with an empty task name."""
+        executor_module._CURRENT_CONTEXT = context
         shareable = Shareable()
         result = executor.execute("", shareable, mock_fl_ctx, mock_signal)
         assert result.get_return_code() == ReturnCode.TASK_UNKNOWN
@@ -168,8 +190,10 @@ class TestCoreasonExecutor:
         mock_signal: MagicMock,
         valid_job_config: Dict[str, Any],
         mock_attestation_provider: MagicMock,  # Need this to mock internal provider if init called here
+        context: UserContext,
     ) -> None:
         """Test weird configuration: same name for training and aggregation."""
+        executor_module._CURRENT_CONTEXT = context
         # Note: CoreasonExecutor calls get_attestation_provider in __init__.
         # So we need the mock active during this call.
         executor = CoreasonExecutor(training_task_name="same_name", aggregation_task_name="same_name")
@@ -196,8 +220,10 @@ class TestCoreasonExecutor:
         executor: CoreasonExecutor,
         mock_fl_ctx: MagicMock,
         mock_signal: MagicMock,
+        context: UserContext,
     ) -> None:
         """Test that exception raised before training check is caught by outer block."""
+        executor_module._CURRENT_CONTEXT = context
         # Force an exception early by making task_name comparison fail or something similar.
         # It's hard to make string comparison fail.
         # But we can mock logger to raise exception?
@@ -225,6 +251,8 @@ class TestCoreasonExecutor:
         # Outer block covers `logger.warning("Received task...")`.
         # If logger raises exception, outer block catches it.
 
-        with patch("coreason_enclave.federation.executor.logger.warning", side_effect=RuntimeError("Log warn failed")):
+        with patch(
+            "coreason_enclave.federation.executor.logger.warning", side_effect=RuntimeError("Log warn failed")
+        ):
             result = executor.execute("unknown_task", Shareable(), mock_fl_ctx, mock_signal)
             assert result.get_return_code() == ReturnCode.EXECUTION_EXCEPTION
