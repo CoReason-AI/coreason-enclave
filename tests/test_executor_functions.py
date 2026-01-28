@@ -30,7 +30,7 @@ class TestExecutorFunctions:
     def test_start_client_no_context(self) -> None:
         """Test start_client raises ValueError without context."""
         with pytest.raises(ValueError, match="UserContext is required"):
-            start_client(None, "/tmp/ws", "config.json")  # type: ignore
+            start_client(None, "/tmp/ws", "config.json")
 
     def test_start_client_no_module(self, context: UserContext) -> None:
         """Test start_client logs warning if client_train missing."""
@@ -53,7 +53,7 @@ class TestExecutorFunctions:
     def test_start_server_no_context(self) -> None:
         """Test start_server raises ValueError without context."""
         with pytest.raises(ValueError, match="UserContext is required"):
-            start_server(None)  # type: ignore
+            start_server(None)
 
     def test_run_federated_training_success(self, context: UserContext) -> None:
         """Test run_federated_training success path (stub)."""
@@ -68,4 +68,4 @@ class TestExecutorFunctions:
     def test_run_federated_training_no_context(self) -> None:
         """Test run_federated_training raises ValueError without context."""
         with pytest.raises(ValueError, match="UserContext is required"):
-            run_federated_training(None)  # type: ignore
+            run_federated_training(None)

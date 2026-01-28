@@ -72,37 +72,41 @@ class TestCoreasonEnclaveServiceAsync:
         with pytest.raises(RuntimeError):
             await service.execute_training_task(shareable, Signal(), context=context)
 
-    async def test_train_model_no_context(
-        self, service: CoreasonEnclaveServiceAsync
-    ) -> None:
+    async def test_train_model_no_context(self, service: CoreasonEnclaveServiceAsync) -> None:
         """Test train_model validation."""
         dummy_job = FederationJob(
-            job_id="00000000-0000-0000-0000-000000000000", clients=["c"], min_clients=1, rounds=1,
-            dataset_id="d", model_arch="m", strategy="FED_AVG",
-            privacy=PrivacyConfig(noise_multiplier=1.0, max_grad_norm=1.0, target_epsilon=10.0)
+            job_id="00000000-0000-0000-0000-000000000000",
+            clients=["c"],
+            min_clients=1,
+            rounds=1,
+            dataset_id="d",
+            model_arch="m",
+            strategy="FED_AVG",
+            privacy=PrivacyConfig(noise_multiplier=1.0, max_grad_norm=1.0, target_epsilon=10.0),
         )
         with pytest.raises(ValueError, match="UserContext is required"):
-            await service.train_model(None, dummy_job, {}, None, Signal())  # type: ignore
+            await service.train_model(None, dummy_job, {}, None, Signal())
 
-    async def test_evaluate_model(
-        self, service: CoreasonEnclaveServiceAsync, context: UserContext
-    ) -> None:
+    async def test_evaluate_model(self, service: CoreasonEnclaveServiceAsync, context: UserContext) -> None:
         """Test evaluate_model logic (stub)."""
         dummy_job = FederationJob(
-            job_id="00000000-0000-0000-0000-000000000000", clients=["c"], min_clients=1, rounds=1,
-            dataset_id="d", model_arch="m", strategy="FED_AVG",
-            privacy=PrivacyConfig(noise_multiplier=1.0, max_grad_norm=1.0, target_epsilon=10.0)
+            job_id="00000000-0000-0000-0000-000000000000",
+            clients=["c"],
+            min_clients=1,
+            rounds=1,
+            dataset_id="d",
+            model_arch="m",
+            strategy="FED_AVG",
+            privacy=PrivacyConfig(noise_multiplier=1.0, max_grad_norm=1.0, target_epsilon=10.0),
         )
 
         result = await service.evaluate_model(context, dummy_job, {}, Signal())
         assert result == {}  # Stub returns empty dict
 
-    async def test_evaluate_model_no_context(
-        self, service: CoreasonEnclaveServiceAsync
-    ) -> None:
+    async def test_evaluate_model_no_context(self, service: CoreasonEnclaveServiceAsync) -> None:
         """Test evaluate_model validation."""
         with pytest.raises(ValueError, match="UserContext is required"):
-            await service.evaluate_model(None, MagicMock(), {}, Signal())  # type: ignore
+            await service.evaluate_model(None, MagicMock(), {}, Signal())
 
 
 class TestCoreasonEnclaveService:
