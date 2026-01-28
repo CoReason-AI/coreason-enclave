@@ -18,7 +18,7 @@ and acts as the "Secure Compute Wrapper" for the training process.
 import argparse
 import os
 import sys
-from typing import List, Optional
+from typing import Optional
 
 # Workaround for NVFlare Windows issue
 if sys.platform == "win32":  # pragma: no cover
@@ -30,6 +30,7 @@ if sys.platform == "win32":  # pragma: no cover
         sys.modules["resource"] = MagicMock()
 
 from coreason_identity.models import UserContext
+
 from coreason_enclave.federation.executor import start_client
 from coreason_enclave.utils.logger import logger
 

@@ -11,11 +11,11 @@ import anyio
 import httpx
 import torch
 import torch.optim as optim
+from coreason_identity.models import UserContext
 from nvflare.apis.shareable import Shareable
 from nvflare.apis.signal import Signal
 from torch.utils.data import DataLoader
 
-from coreason_identity.models import UserContext
 from coreason_enclave.data.loader import DataLoaderFactory
 from coreason_enclave.federation.strategies import (
     FedAvgStrategy,
@@ -336,9 +336,7 @@ class CoreasonEnclaveServiceAsync:
         if not job_config:
             raise ValueError("Invalid job configuration")
 
-        return await self.train_model(
-            context, job_config, shareable.get("params"), shareable, abort_signal
-        )
+        return await self.train_model(context, job_config, shareable.get("params"), shareable, abort_signal)
 
 
 class CoreasonEnclaveService:
@@ -381,9 +379,7 @@ class CoreasonEnclaveService:
     ) -> Dict[str, Any]:
         if not self._portal:
             raise RuntimeError("Service used outside of context manager")
-        return self._portal.call(
-            self._async.train_model, context, job_config, params, shareable, abort_signal
-        )  # type: ignore[no-any-return]
+        return self._portal.call(self._async.train_model, context, job_config, params, shareable, abort_signal)  # type: ignore[no-any-return]
 
     def evaluate_model(
         self,
@@ -394,9 +390,7 @@ class CoreasonEnclaveService:
     ) -> Dict[str, Any]:
         if not self._portal:
             raise RuntimeError("Service used outside of context manager")
-        return self._portal.call(
-            self._async.evaluate_model, context, job_config, params, abort_signal
-        )  # type: ignore[no-any-return]
+        return self._portal.call(self._async.evaluate_model, context, job_config, params, abort_signal)  # type: ignore[no-any-return]
 
     def execute_training_task(
         self,
@@ -409,6 +403,4 @@ class CoreasonEnclaveService:
         """
         if not self._portal:
             raise RuntimeError("Service used outside of context manager")
-        return self._portal.call(
-            self._async.execute_training_task, shareable, abort_signal, context
-        )  # type: ignore[no-any-return]
+        return self._portal.call(self._async.execute_training_task, shareable, abort_signal, context)  # type: ignore[no-any-return]

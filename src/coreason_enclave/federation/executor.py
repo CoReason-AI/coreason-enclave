@@ -35,15 +35,14 @@ except ImportError:
     # Fallback for environments without nvflare installed
     client_train = None
 
+from coreason_identity.models import UserContext
 from nvflare.apis.executor import Executor
 from nvflare.apis.fl_context import FLContext
 from nvflare.apis.shareable import ReturnCode, Shareable, make_reply
 from nvflare.apis.signal import Signal
 
-from coreason_identity.models import UserContext
 from coreason_enclave.services import CoreasonEnclaveService
 from coreason_enclave.utils.logger import logger
-
 
 _CURRENT_CONTEXT: Optional[UserContext] = None
 
@@ -191,9 +190,7 @@ class CoreasonExecutor(Executor):  # type: ignore[misc]
         try:
             if task_name == self.training_task_name:
                 try:
-                    result_dict = self.service.execute_training_task(
-                        shareable, abort_signal, context=context
-                    )
+                    result_dict = self.service.execute_training_task(shareable, abort_signal, context=context)
                     # Convert dict to Shareable
                     result = Shareable()
                     result.update(result_dict)

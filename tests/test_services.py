@@ -11,10 +11,10 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from coreason_identity.models import UserContext
 from nvflare.apis.shareable import Shareable
 from nvflare.apis.signal import Signal
 
-from coreason_identity.models import UserContext
 from coreason_enclave.services import CoreasonEnclaveService, CoreasonEnclaveServiceAsync
 
 

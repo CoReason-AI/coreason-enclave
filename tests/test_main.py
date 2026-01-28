@@ -13,8 +13,8 @@ import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
-
 from coreason_identity.models import UserContext
+
 from coreason_enclave.main import main
 
 # Mock sys.modules["resource"] for Windows tests if needed, similar to conftest

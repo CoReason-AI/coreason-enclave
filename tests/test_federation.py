@@ -14,13 +14,13 @@ from typing import Any, Dict, Generator
 from unittest.mock import MagicMock, patch
 
 import pytest
+from coreason_identity.models import UserContext
 from nvflare.apis.fl_context import FLContext
 from nvflare.apis.shareable import ReturnCode, Shareable
 from nvflare.apis.signal import Signal
 
-from coreason_identity.models import UserContext
-from coreason_enclave.federation.executor import CoreasonExecutor
 from coreason_enclave.federation import executor as executor_module
+from coreason_enclave.federation.executor import CoreasonExecutor
 from coreason_enclave.schemas import AttestationReport
 
 
@@ -33,6 +33,7 @@ class TestCoreasonExecutor:
             permissions=[],
             project_context="test",
         )
+
     @pytest.fixture
     def mock_attestation_provider(self) -> Generator[MagicMock, None, None]:
         # get_attestation_provider moved to services.py, so we mock it there if needed,
@@ -124,9 +125,7 @@ class TestCoreasonExecutor:
 
         result = executor.execute("train_task", shareable, mock_fl_ctx, mock_signal)
 
-        executor.service.execute_training_task.assert_called_once_with(
-            shareable, mock_signal, context=context
-        )
+        executor.service.execute_training_task.assert_called_once_with(shareable, mock_signal, context=context)
         assert isinstance(result, Shareable)
         assert result.get_return_code() == ReturnCode.OK
 
@@ -251,8 +250,6 @@ class TestCoreasonExecutor:
         # Outer block covers `logger.warning("Received task...")`.
         # If logger raises exception, outer block catches it.
 
-        with patch(
-            "coreason_enclave.federation.executor.logger.warning", side_effect=RuntimeError("Log warn failed")
-        ):
+        with patch("coreason_enclave.federation.executor.logger.warning", side_effect=RuntimeError("Log warn failed")):
             result = executor.execute("unknown_task", Shareable(), mock_fl_ctx, mock_signal)
             assert result.get_return_code() == ReturnCode.EXECUTION_EXCEPTION
