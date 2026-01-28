@@ -41,6 +41,7 @@ from nvflare.apis.fl_context import FLContext
 from nvflare.apis.shareable import ReturnCode, Shareable, make_reply
 from nvflare.apis.signal import Signal
 
+from coreason_enclave.privacy import PrivacyBudgetExceededError
 from coreason_enclave.services import CoreasonEnclaveService
 from coreason_enclave.utils.logger import logger
 
@@ -195,6 +196,9 @@ class CoreasonExecutor(Executor):  # type: ignore[misc]
                     result = Shareable()
                     result.update(result_dict)
                     return result
+                except (IdentityVerificationError, PrivacyBudgetExceededError) as e:
+                    logger.error(f"Security/Privacy violation: {e}")
+                    return make_reply(ReturnCode.EXECUTION_RESULT_ERROR)
                 except ValueError:
                     return make_reply(ReturnCode.BAD_TASK_DATA)
                 except Exception as e:

@@ -25,6 +25,10 @@ from coreason_enclave.federation import executor as executor_module
 from coreason_enclave.federation.executor import CoreasonExecutor
 from coreason_enclave.schemas import AttestationReport
 
+valid_user_context = UserContext(
+    user_id="test_user", username="tester", privacy_budget_spent=0.0, privacy_budget_limit=10.0
+)
+
 
 class TestComplexScenarios:
     @pytest.fixture
@@ -88,6 +92,12 @@ class TestComplexScenarios:
             "model_arch": "SimpleMLP",  # Expects input_dim=10 by default
             "strategy": "FED_AVG",
             "privacy": {"mechanism": "DP_SGD", "noise_multiplier": 1.0, "max_grad_norm": 1.0, "target_epsilon": 10.0},
+            "user_context": {
+                "user_id": "u1",
+                "username": "user1",
+                "privacy_budget_spent": 0.0,
+                "privacy_budget_limit": 10.0,
+            },
         }
 
     def test_dimension_mismatch(

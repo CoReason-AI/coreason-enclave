@@ -3810,7 +3810,7 @@ version = "23.2.0.20240623"
 description = "Typing stubs for aiofiles"
 optional = false
 python-versions = ">=3.8"
-groups = ["dev"]
+groups = ["main", "dev"]
 files = [
     {file = "types-aiofiles-23.2.0.20240623.tar.gz", hash = "sha256:d515b2fa46bf894aff45a364a704f050de3898344fd6c5994d58dc8b59ab71e6"},
     {file = "types_aiofiles-23.2.0.20240623-py3-none-any.whl", hash = "sha256:70597b29fc40c8583b6d755814b2cd5fcdb6785622e82d74ef499f9066316e08"},

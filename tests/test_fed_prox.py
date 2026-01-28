@@ -25,6 +25,10 @@ from coreason_enclave.federation.executor import CoreasonExecutor
 from coreason_enclave.models.simple_mlp import SimpleMLP
 from coreason_enclave.schemas import FederationJob
 
+valid_user_context = UserContext(
+    user_id="test_user", username="tester", privacy_budget_spent=0.0, privacy_budget_limit=10.0
+)
+
 
 class TestFedProxIntegration:
     @pytest.fixture
@@ -38,6 +42,12 @@ class TestFedProxIntegration:
             "model_arch": "SimpleMLP",
             "strategy": "FED_AVG",  # Default to FED_AVG
             "privacy": {"noise_multiplier": 1.0, "max_grad_norm": 1.0, "target_epsilon": 10.0},
+            "user_context": {
+                "user_id": "u1",
+                "username": "user1",
+                "privacy_budget_spent": 0.0,
+                "privacy_budget_limit": 10.0,
+            },
         }
 
     @pytest.fixture
