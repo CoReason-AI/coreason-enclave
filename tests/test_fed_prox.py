@@ -20,6 +20,7 @@ from nvflare.apis.shareable import ReturnCode, Shareable
 from nvflare.apis.signal import Signal
 from torch.utils.data import DataLoader
 
+from coreason_enclave.federation import executor as executor_module
 from coreason_enclave.federation.executor import CoreasonExecutor
 from coreason_enclave.models.simple_mlp import SimpleMLP
 from coreason_enclave.schemas import FederationJob
@@ -61,6 +62,16 @@ class TestFedProxIntegration:
         return torch.utils.data.DataLoader(dataset, batch_size=32, shuffle=False)
 
     @pytest.fixture
+    def context(self) -> UserContext:
+        return UserContext(
+            user_id="test-user",
+            username="test-user",
+            email="test@coreason.ai",
+            permissions=[],
+            project_context="test",
+        )
+
+    @pytest.fixture
     def executor(self, mock_data_loader: DataLoader[Any]) -> Generator[CoreasonExecutor, None, None]:
         # Patch dependencies before creating executor (which starts service)
         with (
@@ -90,13 +101,18 @@ class TestFedProxIntegration:
             yield executor
 
     def test_fed_prox_vs_fed_avg(
-        self, executor: CoreasonExecutor, basic_job_config: Dict[str, Any], mock_data_loader: DataLoader[Any]
+        self,
+        executor: CoreasonExecutor,
+        basic_job_config: Dict[str, Any],
+        mock_data_loader: DataLoader[Any],
+        context: UserContext,
     ) -> None:
         """
         Test that FED_PROX produces a higher loss than FED_AVG given the same inputs
         and weights, because of the added proximal term.
         To observe this, we need the weights to move away from the global weights.
         """
+        executor_module._CURRENT_CONTEXT = context
 
         # 1. Setup Common Inputs
         initial_params = SimpleMLP().state_dict()
@@ -162,9 +178,14 @@ class TestFedProxIntegration:
         assert loss_prox > loss_avg
 
     def test_malformed_params_handling(
-        self, executor: CoreasonExecutor, basic_job_config: Dict[str, Any], mock_data_loader: DataLoader[Any]
+        self,
+        executor: CoreasonExecutor,
+        basic_job_config: Dict[str, Any],
+        mock_data_loader: DataLoader[Any],
+        context: UserContext,
     ) -> None:
         """Test that malformed incoming params are handled gracefully (warning logged)."""
+        executor_module._CURRENT_CONTEXT = context
         # Ensure we don't crash when params are malformed
         torch.manual_seed(42)
 
@@ -203,9 +224,14 @@ class TestFedProxIntegration:
             FederationJob(**basic_job_config)
 
     def test_fed_prox_mu_zero(
-        self, executor: CoreasonExecutor, basic_job_config: Dict[str, Any], mock_data_loader: DataLoader[Any]
+        self,
+        executor: CoreasonExecutor,
+        basic_job_config: Dict[str, Any],
+        mock_data_loader: DataLoader[Any],
+        context: UserContext,
     ) -> None:
         """Test that setting proximal_mu=0 results in behavior identical to FED_AVG."""
+        executor_module._CURRENT_CONTEXT = context
         # 1. Setup
         initial_params = SimpleMLP().state_dict()
         shareable_params = {k: v.clone() for k, v in initial_params.items()}
@@ -241,9 +267,14 @@ class TestFedProxIntegration:
         assert loss_avg == pytest.approx(loss_prox_0, rel=1e-6)
 
     def test_fed_prox_no_incoming_params(
-        self, executor: CoreasonExecutor, basic_job_config: Dict[str, Any], mock_data_loader: DataLoader[Any]
+        self,
+        executor: CoreasonExecutor,
+        basic_job_config: Dict[str, Any],
+        mock_data_loader: DataLoader[Any],
+        context: UserContext,
     ) -> None:
         """Test that FedProx degrades gracefully (acts like FedAvg) if no global params are provided."""
+        executor_module._CURRENT_CONTEXT = context
         # --- RUN 1: FED_AVG (No params provided) ---
         torch.manual_seed(42)
         job_avg = basic_job_config.copy()
@@ -275,9 +306,14 @@ class TestFedProxIntegration:
         assert loss_avg == pytest.approx(loss_prox, rel=1e-6)
 
     def test_fed_prox_frozen_layers(
-        self, executor: CoreasonExecutor, basic_job_config: Dict[str, Any], mock_data_loader: DataLoader[Any]
+        self,
+        executor: CoreasonExecutor,
+        basic_job_config: Dict[str, Any],
+        mock_data_loader: DataLoader[Any],
+        context: UserContext,
     ) -> None:
         """Test that FedProx ignores frozen layers (requires_grad=False)."""
+        executor_module._CURRENT_CONTEXT = context
 
         # Define a model class with frozen layers
         class FrozenSimpleMLP(SimpleMLP):

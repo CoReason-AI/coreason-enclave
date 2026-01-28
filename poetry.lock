@@ -562,19 +562,17 @@ markers = {main = "sys_platform == \"win32\" or platform_system == \"Windows\""}
 
 [[package]]
 name = "coreason-identity"
-version = "0.4.1"
+version = "0.1.0"
 description = "Decoupled authentication middleware, abstracting OIDC and OAuth2 protocols from the main application."
 optional = false
 python-versions = "<3.15,>=3.11"
 groups = ["main"]
 files = [
-    {file = "coreason_identity-0.4.1-py3-none-any.whl", hash = "sha256:75603a73c0686f9c28b4b3880865eb396e45742d11aca4338089d1f4eab643e3"},
-    {file = "coreason_identity-0.4.1.tar.gz", hash = "sha256:79ace7f614be704cc025a429ef48e8626fe30c6bed516a926fd345e5509efc0d"},
+    {file = "coreason_identity-0.1.0-py3-none-any.whl", hash = "sha256:f704222f3587687f7139f5b26492a428d86d594d60c2aab2947a44bed025cda4"},
+    {file = "coreason_identity-0.1.0.tar.gz", hash = "sha256:3a73397f743ff984dae4df0c4e515af16ebe1684b6c8250c0b78509bb623ac03"},
 ]
 
 [package.dependencies]
-aiofiles = ">=23.0.0,<24.0.0"
-anyio = ">=4.12.1,<5.0.0"
 authlib = ">=1.6.6,<2.0.0"
 email-validator = ">=2.3.0,<3.0.0"
 httpx = ">=0.28.1,<0.29.0"
@@ -582,7 +580,6 @@ loguru = ">=0.7.2,<0.8.0"
 opentelemetry-api = ">=1.39.1,<2.0.0"
 pydantic = ">=2.12.5,<3.0.0"
 pydantic-settings = ">=2.12.0,<3.0.0"
-types-aiofiles = ">=23.0.0,<24.0.0"
 
 [[package]]
 name = "coverage"
@@ -4142,4 +4139,4 @@ type = ["pytest-mypy"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12, <3.15"
-content-hash = "f6b3289066382a3583c6f083bcf4215e6a9b18062fd338a673144597d7706a97"
+content-hash = "b5531d23b85e8713d30e7c4a9d1db135e2b73f9107a8e3ee9abcc64d6853fea2"

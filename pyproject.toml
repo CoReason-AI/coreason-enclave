@@ -15,10 +15,10 @@ torch = "^2.9.1"
 opacus = "^1.5.4"
 nvflare = "^2.7.1"
 pandas = "^2.3.3"
-anyio = "^4.12.1"
+anyio = "^4.4.0"
 httpx = "^0.28.1"
 aiofiles = "^23.2.1"
-coreason-identity = "*"
+coreason-identity = "^0.1.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.2.2"

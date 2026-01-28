@@ -21,6 +21,7 @@ from nvflare.apis.shareable import ReturnCode, Shareable
 from nvflare.apis.signal import Signal
 from torch.utils.data import DataLoader, TensorDataset
 
+from coreason_enclave.federation import executor as executor_module
 from coreason_enclave.federation.executor import CoreasonExecutor
 from coreason_enclave.schemas import AttestationReport
 
@@ -72,6 +73,16 @@ class TestComplexScenarios:
         return signal
 
     @pytest.fixture
+    def context(self) -> UserContext:
+        return UserContext(
+            user_id="test-user",
+            username="test-user",
+            email="test@coreason.ai",
+            permissions=[],
+            project_context="test",
+        )
+
+    @pytest.fixture
     def basic_job_config(self) -> Dict[str, Any]:
         return {
             "job_id": str(uuid.uuid4()),
@@ -96,12 +107,14 @@ class TestComplexScenarios:
         mock_fl_ctx: MagicMock,
         mock_signal: MagicMock,
         basic_job_config: Dict[str, Any],
+        context: UserContext,
     ) -> None:
         """
         Scenario: The dataset has 5 features, but SimpleMLP expects 10.
         Expectation: PyTorch raises RuntimeError during forward pass.
         Executor catches it and returns EXECUTION_EXCEPTION.
         """
+        executor_module._CURRENT_CONTEXT = context
         shareable = Shareable()
         shareable.set_header("job_config", json.dumps(basic_job_config))
 
@@ -128,11 +141,13 @@ class TestComplexScenarios:
         mock_fl_ctx: MagicMock,
         mock_signal: MagicMock,
         basic_job_config: Dict[str, Any],
+        context: UserContext,
     ) -> None:
         """
         Scenario: Abort signal is triggered in the middle of an epoch.
         Expectation: The loop terminates early and returns a Shareable (likely empty or partial).
         """
+        executor_module._CURRENT_CONTEXT = context
         basic_job_config["rounds"] = 5  # Run multiple epochs
         shareable = Shareable()
         shareable.set_header("job_config", json.dumps(basic_job_config))
@@ -198,12 +213,14 @@ class TestComplexScenarios:
         mock_fl_ctx: MagicMock,
         mock_signal: MagicMock,
         basic_job_config: Dict[str, Any],
+        context: UserContext,
     ) -> None:
         """
         Scenario: Input data contains NaNs.
         Expectation: Model produces NaN loss. Executor might catch it or Opacus might fail.
         Ideally, it should fail gracefully or finish with NaN metrics, but NOT crash the agent process.
         """
+        executor_module._CURRENT_CONTEXT = context
         shareable = Shareable()
         shareable.set_header("job_config", json.dumps(basic_job_config))
 
