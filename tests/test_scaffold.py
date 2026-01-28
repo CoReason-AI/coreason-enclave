@@ -13,15 +13,26 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 import torch
+from coreason_identity.models import UserContext
 from nvflare.apis.fl_context import FLContext
 from nvflare.apis.shareable import ReturnCode, Shareable
 from nvflare.apis.signal import Signal
 
+from coreason_enclave.federation import executor as executor_module
 from coreason_enclave.federation.executor import CoreasonExecutor
 from coreason_enclave.schemas import AggregationStrategy, FederationJob, PrivacyConfig
 
 
 class TestScaffoldIntegration:
+    @pytest.fixture
+    def context(self) -> UserContext:
+        return UserContext(
+            sub="test-user",
+            email="test@coreason.ai",
+            permissions=[],
+            project_context="test",
+        )
+
     @pytest.fixture
     def executor(self) -> Generator[CoreasonExecutor, None, None]:
         """Fixture for CoreasonExecutor."""
@@ -62,8 +73,11 @@ class TestScaffoldIntegration:
             privacy=PrivacyConfig(noise_multiplier=1.0, max_grad_norm=1.0, target_epsilon=10.0),
         )
 
-    def test_scaffold_multi_round_persistence(self, executor: CoreasonExecutor, job_config: FederationJob) -> None:
+    def test_scaffold_multi_round_persistence(
+        self, executor: CoreasonExecutor, job_config: FederationJob, context: UserContext
+    ) -> None:
         """Test complex scenario: Multiple rounds to verify state persistence."""
+        executor_module._CURRENT_CONTEXT = context
 
         # Prepare Shareable Round 1
         shareable1 = Shareable()
@@ -113,8 +127,11 @@ class TestScaffoldIntegration:
         local_weight_r2 = executor.service._async.scaffold_c_local["net.0.weight"]
         assert not torch.allclose(local_weight_r2, local_weight_r1)
 
-    def test_integration_execution(self, executor: CoreasonExecutor, job_config: FederationJob) -> None:
+    def test_integration_execution(
+        self, executor: CoreasonExecutor, job_config: FederationJob, context: UserContext
+    ) -> None:
         """Test full execution flow with SCAFFOLD strategy."""
+        executor_module._CURRENT_CONTEXT = context
 
         # Prepare Shareable
         shareable = Shareable()
@@ -165,8 +182,11 @@ class TestScaffoldIntegration:
         # Verify local state was updated
         assert "net.0.weight" in executor.service._async.scaffold_c_local
 
-    def test_scaffold_strategy_isolation(self, executor: CoreasonExecutor, job_config: FederationJob) -> None:
+    def test_scaffold_strategy_isolation(
+        self, executor: CoreasonExecutor, job_config: FederationJob, context: UserContext
+    ) -> None:
         """Test that other strategies (e.g. FED_AVG) do NOT affect SCAFFOLD state."""
+        executor_module._CURRENT_CONTEXT = context
 
         # Modify job config to use FED_AVG
         job_config.strategy = AggregationStrategy.FED_AVG
