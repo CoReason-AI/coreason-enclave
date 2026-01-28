@@ -16,6 +16,7 @@ from nvflare.apis.shareable import Shareable
 from nvflare.apis.signal import Signal
 
 from coreason_enclave.services import CoreasonEnclaveService, CoreasonEnclaveServiceAsync
+from coreason_enclave.schemas import AggregationStrategy, FederationJob, PrivacyConfig
 
 
 @pytest.mark.asyncio
@@ -54,8 +55,22 @@ class TestCoreasonEnclaveServiceAsync:
         service.attestation_provider = MagicMock()
         service.attestation_provider.attest.return_value.status = "UNTRUSTED"
 
+        shareable = Shareable()
+        # Create a dummy config so validation passes before checking hardware
+        dummy_config = FederationJob(
+            job_id="00000000-0000-0000-0000-000000000000",
+            clients=["c1"],
+            min_clients=1,
+            rounds=1,
+            dataset_id="ds",
+            model_arch="SimpleMLP",
+            strategy=AggregationStrategy.FED_AVG,
+            privacy=PrivacyConfig(noise_multiplier=1.0, max_grad_norm=1.0, target_epsilon=10.0),
+        )
+        shareable.set_header("job_config", dummy_config.model_dump_json())
+
         with pytest.raises(RuntimeError):
-            await service.execute_training_task(Shareable(), Signal(), context=context)
+            await service.execute_training_task(shareable, Signal(), context=context)
 
 
 class TestCoreasonEnclaveService:

@@ -324,18 +324,12 @@ class CoreasonEnclaveServiceAsync:
 
         Returns a dictionary representing the result shareable content (or error).
         """
-        # 1. Check Hardware Trust
-        try:
-            await self.check_hardware_trust()
-        except RuntimeError as e:
-            logger.error(f"Attestation failed: {e}")
-            raise e
-
-        # 2. Parse Config
+        # 1. Parse Config
         job_config = self._parse_job_config(shareable)
         if not job_config:
             raise ValueError("Invalid job configuration")
 
+        # 2. Delegate to train_model (which handles attestation)
         return await self.train_model(context, job_config, shareable.get("params"), shareable, abort_signal)
 
 
