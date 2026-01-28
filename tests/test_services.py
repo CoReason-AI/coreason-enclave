@@ -29,7 +29,8 @@ class TestCoreasonEnclaveServiceAsync:
     @pytest.fixture
     def context(self) -> UserContext:
         return UserContext(
-            sub="test-user",
+            user_id="test-user",
+            username="test-user",
             email="test@coreason.ai",
             permissions=[],
             project_context="test",
@@ -66,13 +67,14 @@ class TestCoreasonEnclaveServiceAsync:
             model_arch="SimpleMLP",
             strategy=AggregationStrategy.FED_AVG,
             privacy=PrivacyConfig(noise_multiplier=1.0, max_grad_norm=1.0, target_epsilon=10.0),
+            user_context=context,
         )
         shareable.set_header("job_config", dummy_config.model_dump_json())
 
         with pytest.raises(RuntimeError):
             await service.execute_training_task(shareable, Signal(), context=context)
 
-    async def test_train_model_no_context(self, service: CoreasonEnclaveServiceAsync) -> None:
+    async def test_train_model_no_context(self, service: CoreasonEnclaveServiceAsync, context: UserContext) -> None:
         """Test train_model validation."""
         dummy_job = FederationJob(
             job_id="00000000-0000-0000-0000-000000000000",
@@ -83,9 +85,10 @@ class TestCoreasonEnclaveServiceAsync:
             model_arch="m",
             strategy="FED_AVG",
             privacy=PrivacyConfig(noise_multiplier=1.0, max_grad_norm=1.0, target_epsilon=10.0),
+            user_context=context,
         )
         with pytest.raises(ValueError, match="UserContext is required"):
-            await service.train_model(None, dummy_job, {}, None, Signal())
+            await service.train_model(None, dummy_job, {}, None, Signal())  # type: ignore[arg-type]
 
     async def test_evaluate_model(self, service: CoreasonEnclaveServiceAsync, context: UserContext) -> None:
         """Test evaluate_model logic (stub)."""
@@ -98,6 +101,7 @@ class TestCoreasonEnclaveServiceAsync:
             model_arch="m",
             strategy="FED_AVG",
             privacy=PrivacyConfig(noise_multiplier=1.0, max_grad_norm=1.0, target_epsilon=10.0),
+            user_context=context,
         )
 
         result = await service.evaluate_model(context, dummy_job, {}, Signal())
@@ -105,15 +109,17 @@ class TestCoreasonEnclaveServiceAsync:
 
     async def test_evaluate_model_no_context(self, service: CoreasonEnclaveServiceAsync) -> None:
         """Test evaluate_model validation."""
+        # Use None for context which is invalid but expected by the method signature to be UserContext
         with pytest.raises(ValueError, match="UserContext is required"):
-            await service.evaluate_model(None, MagicMock(), {}, Signal())
+            await service.evaluate_model(None, MagicMock(), {}, Signal())  # type: ignore[arg-type]
 
 
 class TestCoreasonEnclaveService:
     @pytest.fixture
     def context(self) -> UserContext:
         return UserContext(
-            sub="test-user",
+            user_id="test-user",
+            username="test-user",
             email="test@coreason.ai",
             permissions=[],
             project_context="test",

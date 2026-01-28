@@ -45,7 +45,8 @@ class TestCoreasonExecutor:
     @pytest.fixture
     def context(self) -> UserContext:
         return UserContext(
-            sub="test-user",
+            user_id="test-user",
+            username="test-user",
             email="test@coreason.ai",
             permissions=[],
             project_context="test",
@@ -101,6 +102,13 @@ class TestCoreasonExecutor:
             "model_arch": "SimpleMLP",
             "strategy": "FED_AVG",
             "privacy": {"mechanism": "DP_SGD", "noise_multiplier": 10.0, "max_grad_norm": 1.0, "target_epsilon": 100.0},
+            "user_context": {
+                "user_id": "test-user",
+                "username": "test-user",
+                "email": "test@coreason.ai",
+                "permissions": [],
+                "project_context": "test",
+            },
         }
 
     def test_init(self, executor: CoreasonExecutor) -> None:

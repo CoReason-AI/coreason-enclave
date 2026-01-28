@@ -116,7 +116,8 @@ def main(args: Optional[list[str]] = None) -> None:
 
         # 2. Create System Context
         system_context = UserContext(
-            sub="cli-user",
+            user_id="cli-user",
+            username="cli-user",
             email="cli@coreason.ai",
             permissions=["system"],
             project_context="cli",

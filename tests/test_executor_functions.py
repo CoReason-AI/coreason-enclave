@@ -10,7 +10,8 @@ class TestExecutorFunctions:
     @pytest.fixture
     def context(self) -> UserContext:
         return UserContext(
-            sub="test-user",
+            user_id="test-user",
+            username="test-user",
             email="test@coreason.ai",
             permissions=[],
             project_context="test",
@@ -30,7 +31,7 @@ class TestExecutorFunctions:
     def test_start_client_no_context(self) -> None:
         """Test start_client raises ValueError without context."""
         with pytest.raises(ValueError, match="UserContext is required"):
-            start_client(None, "/tmp/ws", "config.json")
+            start_client(None, "/tmp/ws", "config.json")  # type: ignore[arg-type]
 
     def test_start_client_no_module(self, context: UserContext) -> None:
         """Test start_client logs warning if client_train missing."""
@@ -46,14 +47,14 @@ class TestExecutorFunctions:
             start_server(context)
             mock_logger.info.assert_any_call(
                 "Initializing Federation Executor",
-                user_id=context.sub,
+                user_id=context.user_id,
                 action="start_server",
             )
 
     def test_start_server_no_context(self) -> None:
         """Test start_server raises ValueError without context."""
         with pytest.raises(ValueError, match="UserContext is required"):
-            start_server(None)
+            start_server(None)  # type: ignore[arg-type]
 
     def test_run_federated_training_success(self, context: UserContext) -> None:
         """Test run_federated_training success path (stub)."""
@@ -61,11 +62,11 @@ class TestExecutorFunctions:
             run_federated_training(context)
             mock_logger.info.assert_any_call(
                 "Initializing Federation Executor",
-                user_id=context.sub,
+                user_id=context.user_id,
                 action="run_federated_training",
             )
 
     def test_run_federated_training_no_context(self) -> None:
         """Test run_federated_training raises ValueError without context."""
         with pytest.raises(ValueError, match="UserContext is required"):
-            run_federated_training(None)
+            run_federated_training(None)  # type: ignore[arg-type]

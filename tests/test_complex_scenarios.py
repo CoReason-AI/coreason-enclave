@@ -75,7 +75,8 @@ class TestComplexScenarios:
     @pytest.fixture
     def context(self) -> UserContext:
         return UserContext(
-            sub="test-user",
+            user_id="test-user",
+            username="test-user",
             email="test@coreason.ai",
             permissions=[],
             project_context="test",

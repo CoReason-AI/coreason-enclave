@@ -185,7 +185,7 @@ class CoreasonEnclaveServiceAsync:
 
         logger.info(
             "Enclave Service Request",
-            user_id=context.sub,
+            user_id=context.user_id,
             operation="train_model",
             model=job_config.model_arch,
         )
@@ -308,7 +308,7 @@ class CoreasonEnclaveServiceAsync:
 
         logger.info(
             "Enclave Service Request",
-            user_id=context.sub,
+            user_id=context.user_id,
             operation="evaluate_model",
             model=job_config.model_arch,
         )
