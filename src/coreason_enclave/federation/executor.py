@@ -35,6 +35,7 @@ except ImportError:
     # Fallback for environments without nvflare installed
     client_train = None
 
+from coreason_identity.exceptions import IdentityVerificationError
 from coreason_identity.models import UserContext
 from nvflare.apis.executor import Executor
 from nvflare.apis.fl_context import FLContext
@@ -65,7 +66,7 @@ def start_client(
 
     logger.info(
         "Initializing Federation Executor",
-        user_id=context.sub,
+        user_id=context.user_id,
         action="start_client",
     )
 
@@ -97,7 +98,7 @@ def start_server(context: UserContext) -> None:
         raise ValueError("UserContext is required")
     logger.info(
         "Initializing Federation Executor",
-        user_id=context.sub,
+        user_id=context.user_id,
         action="start_server",
     )
     # Stub implementation as per instructions to just update logic/logging
@@ -109,7 +110,7 @@ def run_federated_training(context: UserContext) -> None:
         raise ValueError("UserContext is required")
     logger.info(
         "Initializing Federation Executor",
-        user_id=context.sub,
+        user_id=context.user_id,
         action="run_federated_training",
     )
     # Stub implementation
