@@ -92,16 +92,14 @@ def test_attestation_endpoint_error(mock_service: CoreasonEnclaveService) -> Non
 def test_health_check_initializing(mock_service: CoreasonEnclaveService) -> None:
     with TestClient(app) as client:
         # Force status AFTER startup
-        mock_service._async.status = EnclaveStatus.INITIALIZING
-
-        response = client.get("/health")
-        assert response.status_code == 503
-        assert response.json()["detail"] == "Enclave initializing"
+        with patch.object(mock_service._async, "status", EnclaveStatus.INITIALIZING):
+            response = client.get("/health")
+            assert response.status_code == 503
+            assert response.json()["detail"] == "Enclave initializing"
 
 def test_health_check_error_state(mock_service: CoreasonEnclaveService) -> None:
     with TestClient(app) as client:
-        mock_service._async.status = EnclaveStatus.ERROR
-
-        response = client.get("/health")
-        assert response.status_code == 503
-        assert response.json()["detail"] == "Enclave in ERROR state"
+        with patch.object(mock_service._async, "status", EnclaveStatus.ERROR):
+            response = client.get("/health")
+            assert response.status_code == 503
+            assert response.json()["detail"] == "Enclave in ERROR state"

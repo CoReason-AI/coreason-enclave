@@ -4,3 +4,5 @@ torch
 opacus
 nvflare
 pandas
+fastapi
+uvicorn

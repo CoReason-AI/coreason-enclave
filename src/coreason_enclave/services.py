@@ -5,6 +5,7 @@ This module provides the Async-Native and Sync-Facade service classes for the Co
 """
 
 import json
+import threading
 from enum import Enum
 from typing import Any, Dict, Optional, Tuple, cast
 from uuid import UUID
@@ -413,13 +414,15 @@ class CoreasonEnclaveService:
     """
 
     _instance: Optional["CoreasonEnclaveService"] = None
+    _lock: threading.Lock = threading.Lock()
 
     @classmethod
     def get_instance(cls, client: Optional[httpx.AsyncClient] = None) -> "CoreasonEnclaveService":
         """Get or create the singleton instance."""
-        if cls._instance is None:
-            cls._instance = cls(client)
-        return cls._instance
+        with cls._lock:
+            if cls._instance is None:
+                cls._instance = cls(client)
+            return cls._instance
 
     def __init__(self, client: Optional[httpx.AsyncClient] = None):
         # Allow creating new instances, but prefer get_instance for shared state
@@ -427,36 +430,39 @@ class CoreasonEnclaveService:
         self._portal: Optional[anyio.from_thread.BlockingPortal] = None
         self._portal_cm: Any = None
         self._ref_count = 0
+        self._ctx_lock = threading.Lock()
 
         # If this is the first instance created, set it as singleton (if not set)
         if CoreasonEnclaveService._instance is None:
             CoreasonEnclaveService._instance = self
 
     def __enter__(self) -> "CoreasonEnclaveService":
-        # Support re-entrant usage (reference counting)
-        self._ref_count += 1
-        if self._portal is not None:
+        with self._ctx_lock:
+            # Support re-entrant usage (reference counting)
+            self._ref_count += 1
+            if self._portal is not None:
+                return self
+
+            # Start a persistent event loop (portal) for the context
+            self._portal_cm = anyio.from_thread.start_blocking_portal()
+            self._portal = self._portal_cm.__enter__()
+            self._portal.call(self._async.__aenter__)
             return self
 
-        # Start a persistent event loop (portal) for the context
-        self._portal_cm = anyio.from_thread.start_blocking_portal()
-        self._portal = self._portal_cm.__enter__()
-        self._portal.call(self._async.__aenter__)
-        return self
-
     def __exit__(self, *args: Any) -> None:
-        self._ref_count -= 1
-        if self._ref_count > 0:
-            return
+        with self._ctx_lock:
+            self._ref_count -= 1
+            if self._ref_count > 0:
+                return
 
-        if self._portal:
-            try:
-                self._portal.call(self._async.__aexit__, *args)
-            finally:
-                if self._portal_cm:
-                    self._portal_cm.__exit__(None, None, None)
-                self._portal = None
-                self._portal_cm = None
+            if self._portal:
+                try:
+                    self._portal.call(self._async.__aexit__, *args)
+                finally:
+                    if self._portal_cm:
+                        self._portal_cm.__exit__(None, None, None)
+                    self._portal = None
+                    self._portal_cm = None
 
     @property
     def status(self) -> EnclaveStatus:
