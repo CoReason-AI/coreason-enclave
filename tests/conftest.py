@@ -1,7 +1,7 @@
 import sys
 from threading import Lock
 from typing import Generator, List, Optional
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from pydantic import BaseModel
@@ -54,6 +54,16 @@ def reset_enclave_singleton() -> Generator[None, None, None]:
         except Exception:
             pass
         CoreasonEnclaveService._instance = None
+
+
+@pytest.fixture(autouse=True)
+def mock_global_api_server() -> Generator[None, None, None]:
+    """
+    Globally mock the API server startup to prevent port binding conflicts
+    and thread leakage during tests.
+    """
+    with patch("coreason_enclave.main.run_api_server") as mock_server:
+        yield
 
     # Reset lock to ensure no deadlocks from previous mocked locks
     CoreasonEnclaveService._lock = Lock()
