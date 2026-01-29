@@ -115,6 +115,7 @@ class CoreasonEnclaveServiceAsync:
 
     async def refresh_attestation(self) -> AttestationReport:
         """Force a refresh of the attestation report."""
+
         def _refresh() -> AttestationReport:
             report = self.attestation_provider.attest()
             if report.status != "TRUSTED":
@@ -471,7 +472,7 @@ class CoreasonEnclaveService:
     def refresh_attestation(self) -> AttestationReport:
         if not self._portal:
             raise RuntimeError("Service used outside of context manager")
-        return self._portal.call(self._async.refresh_attestation) # type: ignore[no-any-return]
+        return self._portal.call(self._async.refresh_attestation)  # type: ignore[no-any-return]
 
     def get_privacy_budget(self) -> float:
         return self._async.get_privacy_budget()

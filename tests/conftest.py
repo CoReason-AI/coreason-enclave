@@ -1,7 +1,9 @@
 import sys
+from typing import List, Optional
 from unittest.mock import MagicMock
+
 from pydantic import BaseModel
-from typing import Optional, List
+
 
 def pytest_configure(config: MagicMock) -> None:
     # Mock coreason-identity
