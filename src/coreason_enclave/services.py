@@ -6,7 +6,7 @@ This module provides the Async-Native and Sync-Facade service classes for the Co
 
 import json
 from enum import Enum
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple, cast
 from uuid import UUID
 
 import anyio
@@ -122,7 +122,7 @@ class CoreasonEnclaveServiceAsync:
                 self.status = EnclaveStatus.ATTESTED
             return report
 
-        return await anyio.to_thread.run_sync(_refresh)
+        return cast(AttestationReport, await anyio.to_thread.run_sync(_refresh))
 
     def get_privacy_budget(self) -> float:
         """Return current epsilon consumed."""

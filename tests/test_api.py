@@ -1,12 +1,13 @@
 import pytest
 from fastapi.testclient import TestClient
+from typing import Generator
 from unittest.mock import MagicMock, patch
 from coreason_enclave.api import app
 from coreason_enclave.services import CoreasonEnclaveService, EnclaveStatus
 from coreason_enclave.schemas import AttestationReport
 
 @pytest.fixture
-def mock_service():
+def mock_service() -> Generator[CoreasonEnclaveService, None, None]:
     # Reset singleton
     CoreasonEnclaveService._instance = None
 
@@ -31,7 +32,7 @@ def mock_service():
             service.__exit__(None, None, None)
         CoreasonEnclaveService._instance = None
 
-def test_health_check(mock_service):
+def test_health_check(mock_service: CoreasonEnclaveService) -> None:
     # We use TestClient as context manager to trigger lifespan
     with TestClient(app) as client:
         response = client.get("/health")
@@ -39,7 +40,7 @@ def test_health_check(mock_service):
         assert response.json()["status"] == EnclaveStatus.ATTESTED
         assert response.json()["trusted"] is True
 
-def test_attestation_endpoint(mock_service):
+def test_attestation_endpoint(mock_service: CoreasonEnclaveService) -> None:
     with TestClient(app) as client:
         response = client.get("/attestation")
         assert response.status_code == 200
@@ -47,7 +48,7 @@ def test_attestation_endpoint(mock_service):
         assert data["status"] == "TRUSTED"
         assert data["hardware_type"] == "TEST_HARDWARE"
 
-def test_privacy_budget_endpoint(mock_service):
+def test_privacy_budget_endpoint(mock_service: CoreasonEnclaveService) -> None:
     with TestClient(app) as client:
         # Mock privacy guard in service
         mock_service._async._current_privacy_guard = MagicMock()
@@ -57,7 +58,7 @@ def test_privacy_budget_endpoint(mock_service):
         assert response.status_code == 200
         assert response.json()["epsilon"] == 1.23
 
-def test_startup_failure_untrusted():
+def test_startup_failure_untrusted() -> None:
     # Reset singleton to force fresh startup
     CoreasonEnclaveService._instance = None
 
@@ -76,10 +77,10 @@ def test_startup_failure_untrusted():
 
         # Expect RuntimeError during startup (lifespan)
         with pytest.raises(RuntimeError, match="Hardware not trusted"):
-             with TestClient(app) as client:
+             with TestClient(app):
                  pass
 
-def test_attestation_endpoint_error(mock_service):
+def test_attestation_endpoint_error(mock_service: CoreasonEnclaveService) -> None:
     # Start client first (lifespan succeeds)
     with TestClient(app) as client:
         # Now mock the method on the SINGLETON instance
@@ -93,7 +94,7 @@ def test_attestation_endpoint_error(mock_service):
         finally:
              mock_service.refresh_attestation = original_method
 
-def test_health_check_initializing(mock_service):
+def test_health_check_initializing(mock_service: CoreasonEnclaveService) -> None:
     with TestClient(app) as client:
         # Force status AFTER startup
         mock_service._async.status = EnclaveStatus.INITIALIZING
@@ -102,7 +103,7 @@ def test_health_check_initializing(mock_service):
         assert response.status_code == 503
         assert response.json()["detail"] == "Enclave initializing"
 
-def test_health_check_error_state(mock_service):
+def test_health_check_error_state(mock_service: CoreasonEnclaveService) -> None:
     with TestClient(app) as client:
         mock_service._async.status = EnclaveStatus.ERROR
 

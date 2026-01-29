@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+from typing import AsyncGenerator
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
@@ -9,7 +10,7 @@ from coreason_enclave.utils.logger import logger
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """
     Manage the lifecycle of the Enclave API and Service.
 
@@ -36,7 +37,7 @@ async def lifespan(app: FastAPI):
             logger.info("Enclave successfully attested and trusted.")
         except Exception as e:
             logger.critical(f"Startup attestation error: {e}")
-            raise RuntimeError(f"Startup attestation error: {e}")
+            raise RuntimeError(f"Startup attestation error: {e}") from e
 
         yield
     finally:
@@ -56,7 +57,7 @@ class HealthResponse(BaseModel):
     trusted: bool
 
 
-@app.get("/attestation", response_model=AttestationReport)
+@app.get("/attestation", response_model=AttestationReport)  # type: ignore[misc]
 async def get_attestation() -> AttestationReport:
     """
     Get the current Hardware Attestation Report.
@@ -68,10 +69,10 @@ async def get_attestation() -> AttestationReport:
         return service.refresh_attestation()
     except Exception as e:
         logger.error(f"Attestation refresh failed: {e}")
-        raise HTTPException(status_code=500, detail="Attestation failed")
+        raise HTTPException(status_code=500, detail="Attestation failed") from e
 
 
-@app.get("/privacy/budget", response_model=PrivacyBudgetResponse)
+@app.get("/privacy/budget", response_model=PrivacyBudgetResponse)  # type: ignore[misc]
 async def get_privacy_budget() -> PrivacyBudgetResponse:
     """
     Get the current differential privacy budget (epsilon) consumed.
@@ -80,7 +81,7 @@ async def get_privacy_budget() -> PrivacyBudgetResponse:
     return PrivacyBudgetResponse(epsilon=service.get_privacy_budget())
 
 
-@app.get("/health", response_model=HealthResponse)
+@app.get("/health", response_model=HealthResponse)  # type: ignore[misc]
 async def get_health() -> HealthResponse:
     """
     Health check endpoint.
