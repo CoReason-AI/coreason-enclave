@@ -34,6 +34,8 @@ class TestCoreasonEnclaveServiceAsync:
             email="test@coreason.ai",
             permissions=[],
             project_context="test",
+            privacy_budget_spent=0.0,
+            privacy_budget_limit=10.0,
         )
 
     async def test_lifecycle(self) -> None:
@@ -54,7 +56,7 @@ class TestCoreasonEnclaveServiceAsync:
         self, service: CoreasonEnclaveServiceAsync, context: UserContext
     ) -> None:
         service.attestation_provider = MagicMock()
-        service.attestation_provider.attest.return_value.status = "UNTRUSTED"
+        service.attestation_provider.attest.side_effect = RuntimeError("Untrusted environment: UNTRUSTED")
 
         shareable = Shareable()
         # Create a dummy config so validation passes before checking hardware
@@ -123,6 +125,8 @@ class TestCoreasonEnclaveService:
             email="test@coreason.ai",
             permissions=[],
             project_context="test",
+            privacy_budget_spent=0.0,
+            privacy_budget_limit=10.0,
         )
 
     def test_sync_facade_training(self, context: UserContext) -> None:

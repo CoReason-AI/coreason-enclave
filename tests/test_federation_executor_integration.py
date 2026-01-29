@@ -50,6 +50,10 @@ class TestCoreasonExecutorSecurity:
         # Dependencies: get_attestation_provider, DataSentry, DataLoaderFactory.
         # These are instantiated in CoreasonEnclaveServiceAsync.__init__
 
+        # With Singleton, we must ensure these patches apply to the instance used by Executor.
+        # The easiest way is to patch them BEFORE get_instance is called (which happens in executor init).
+        # And rely on the autouse fixture to reset the singleton.
+
         with (
             patch("coreason_enclave.services.get_attestation_provider") as mock_get_attestation,
             patch("coreason_enclave.services.DataSentry") as MockDataSentry,
@@ -77,7 +81,24 @@ class TestCoreasonExecutorSecurity:
             # Default empty loader? Or we set it in test.
 
             executor = CoreasonExecutor(training_task_name="train_task")
-            # Expose mocks on executor for easy access in tests if needed (or just use the patchers)
+
+            # CRITICAL: For Singleton, we must ensure we are mocking the attributes on the *active* service instance.
+            # CoreasonExecutor calls `get_instance()` internally.
+            service_instance = executor.service._async
+
+            # Since patches above mock classes, the service's attributes (assigned in __init__)
+            # should already be these mocks if the service was initialized inside this with block.
+            # The reset_enclave_singleton fixture ensures service is None before we start.
+            # So `executor = CoreasonExecutor(...)` triggers `CoreasonEnclaveService()` which triggers `CoreasonEnclaveServiceAsync()`.
+            # Inside `__init__`, it calls `get_attestation_provider()` (mocked), `DataSentry()` (mocked), etc.
+
+            # So `service_instance.attestation_provider` IS `provider`.
+            # `service_instance.sentry` IS `sentry_instance`.
+
+            # However, for tests that want to change behavior (e.g. return different loader),
+            # they often modify `executor.mock_loader_factory`.
+            # We must bind these helpers to the executor fixture for the tests to use.
+
             executor.mock_attestation_provider = provider
             executor.mock_sentry = sentry_instance
             executor.mock_loader_factory = loader_factory_instance

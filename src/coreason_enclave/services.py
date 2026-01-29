@@ -232,15 +232,18 @@ class CoreasonEnclaveServiceAsync:
 
         self.status = EnclaveStatus.TRAINING
 
-        # Persistent Registry Cleanup: Reset SCAFFOLD state if job ID changes
+        # Persistent Registry Cleanup
+        # If strategy is NOT SCAFFOLD, clear the SCAFFOLD state to prevent leakage.
+        # If job ID changes, clear everything.
         if self._current_job_id != job_config.job_id:
             logger.info(f"New Job detected ({job_config.job_id}). Clearing persistent state.")
             self.scaffold_c_local.clear()
             self._current_job_id = job_config.job_id
-            # Also reset privacy guard for new job?
-            # Usually privacy budget is accumulated per user context, which PrivacyGuard handles.
-            # But we update the reference for monitoring.
             self._current_privacy_guard = None
+        elif job_config.strategy != AggregationStrategy.SCAFFOLD:
+            # If we are running FED_AVG or FED_PROX, ensure we don't accidentally carry over
+            # stale scaffold control variates from a previous run within the same job/session.
+            self.scaffold_c_local.clear()
 
         logger.info(
             "Enclave Service Request",
