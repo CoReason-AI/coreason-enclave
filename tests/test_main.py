@@ -116,3 +116,13 @@ class TestMainLogic:
         with patch.dict(os.environ, {"COREASON_ENCLAVE_SIMULATION": "garbage_value"}, clear=True):
             main(test_args)
             assert os.environ["COREASON_ENCLAVE_SIMULATION"] == "true"
+
+    def test_run_api_server_exception_handling(self) -> None:
+        """Test that run_api_server catches and logs exceptions."""
+        from coreason_enclave.main import run_api_server
+
+        with patch("uvicorn.run", side_effect=Exception("Binding failed")) as mock_uvicorn:
+            with patch("coreason_enclave.main.logger") as mock_logger:
+                run_api_server()
+                mock_uvicorn.assert_called_once()
+                mock_logger.error.assert_called_with("Failed to start Management API: Binding failed")
