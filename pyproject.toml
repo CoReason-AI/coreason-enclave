@@ -18,6 +18,8 @@ pandas = "^3.0.0"
 anyio = "^4.12.1"
 httpx = "^0.28.1"
 aiofiles = "^25.1.0"
+fastapi = "^0.115.0"
+uvicorn = "^0.32.0"
 coreason-identity = "^0.4.2"
 
 [tool.poetry.group.dev.dependencies]
