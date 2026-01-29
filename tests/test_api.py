@@ -84,15 +84,10 @@ def test_attestation_endpoint_error(mock_service: CoreasonEnclaveService) -> Non
     # Start client first (lifespan succeeds)
     with TestClient(app) as client:
         # Now mock the method on the SINGLETON instance
-        original_method = mock_service.refresh_attestation
-        mock_service.refresh_attestation = MagicMock(side_effect=Exception("Simulated Failure"))
-
-        try:
+        with patch.object(mock_service, "refresh_attestation", side_effect=Exception("Simulated Failure")):
             response = client.get("/attestation")
             assert response.status_code == 500
             assert response.json()["detail"] == "Attestation failed"
-        finally:
-             mock_service.refresh_attestation = original_method
 
 def test_health_check_initializing(mock_service: CoreasonEnclaveService) -> None:
     with TestClient(app) as client:
