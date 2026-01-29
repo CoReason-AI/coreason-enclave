@@ -1,7 +1,7 @@
 import sys
-from typing import List, Optional
-from unittest.mock import MagicMock
 from threading import Lock
+from typing import Generator, List, Optional
+from unittest.mock import MagicMock
 
 import pytest
 from pydantic import BaseModel
@@ -36,7 +36,7 @@ def pytest_configure(config: MagicMock) -> None:
 
 
 @pytest.fixture(autouse=True)
-def reset_enclave_singleton():
+def reset_enclave_singleton() -> Generator[None, None, None]:
     """
     Reset the CoreasonEnclaveService singleton before and after each test.
     This prevents state pollution (e.g., SCAFFOLD control variates, privacy guards)

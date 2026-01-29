@@ -47,7 +47,9 @@ class TestMainLogic:
         with patch("coreason_enclave.main.run_api_server") as mock:
             yield mock
 
-    def test_main_secure_default(self, mock_start_client: MagicMock, mock_sys_exit: Any, mock_run_api_server: MagicMock) -> None:
+    def test_main_secure_default(
+        self, mock_start_client: MagicMock, mock_sys_exit: Any, mock_run_api_server: MagicMock
+    ) -> None:
         """Test main runs in secure mode by default."""
         test_args = ["-w", "/tmp/ws", "-c", "conf.json"]
 
@@ -62,7 +64,9 @@ class TestMainLogic:
             assert call_kwargs["conf"] == "conf.json"
             assert isinstance(call_kwargs["context"], UserContext)
 
-    def test_main_insecure_mode(self, mock_start_client: MagicMock, mock_sys_exit: Any, mock_run_api_server: MagicMock) -> None:
+    def test_main_insecure_mode(
+        self, mock_start_client: MagicMock, mock_sys_exit: Any, mock_run_api_server: MagicMock
+    ) -> None:
         """Test main runs in simulation mode with flag."""
         test_args = ["-w", "/tmp/ws", "-c", "conf.json", "--insecure"]
 
@@ -72,7 +76,9 @@ class TestMainLogic:
             assert os.environ["COREASON_ENCLAVE_SIMULATION"] == "true"
             mock_start_client.assert_called_once()
 
-    def test_main_simulation_mode(self, mock_start_client: MagicMock, mock_sys_exit: Any, mock_run_api_server: MagicMock) -> None:
+    def test_main_simulation_mode(
+        self, mock_start_client: MagicMock, mock_sys_exit: Any, mock_run_api_server: MagicMock
+    ) -> None:
         """Test main runs in simulation mode with --simulation flag."""
         test_args = ["-w", "/tmp/ws", "-c", "conf.json", "--simulation"]
 
@@ -82,7 +88,9 @@ class TestMainLogic:
             assert os.environ["COREASON_ENCLAVE_SIMULATION"] == "true"
             mock_start_client.assert_called_once()
 
-    def test_main_aborts_on_env_mismatch(self, mock_start_client: MagicMock, mock_sys_exit: Any, mock_run_api_server: MagicMock) -> None:
+    def test_main_aborts_on_env_mismatch(
+        self, mock_start_client: MagicMock, mock_sys_exit: Any, mock_run_api_server: MagicMock
+    ) -> None:
         """Test abort if env=true but flag missing."""
         test_args = ["-w", "/tmp/ws", "-c", "conf.json"]
 
@@ -99,7 +107,9 @@ class TestMainLogic:
                 assert "Security Violation" in args[0]
                 assert "required '--insecure' or '--simulation' CLI flag is missing" in args[0]
 
-    def test_insecure_flag_overrides_garbage_env(self, mock_start_client: MagicMock, mock_sys_exit: Any, mock_run_api_server: MagicMock) -> None:
+    def test_insecure_flag_overrides_garbage_env(
+        self, mock_start_client: MagicMock, mock_sys_exit: Any, mock_run_api_server: MagicMock
+    ) -> None:
         """Test that --insecure flag overrides a garbage env var."""
         test_args = ["-w", "/tmp/ws", "-c", "conf.json", "--insecure"]
 

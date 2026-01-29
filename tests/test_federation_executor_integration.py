@@ -84,12 +84,13 @@ class TestCoreasonExecutorSecurity:
 
             # CRITICAL: For Singleton, we must ensure we are mocking the attributes on the *active* service instance.
             # CoreasonExecutor calls `get_instance()` internally.
-            service_instance = executor.service._async
+            # service_instance = executor.service._async
 
             # Since patches above mock classes, the service's attributes (assigned in __init__)
             # should already be these mocks if the service was initialized inside this with block.
             # The reset_enclave_singleton fixture ensures service is None before we start.
-            # So `executor = CoreasonExecutor(...)` triggers `CoreasonEnclaveService()` which triggers `CoreasonEnclaveServiceAsync()`.
+            # So `executor = CoreasonExecutor(...)` triggers `CoreasonEnclaveService()` which
+            # triggers `CoreasonEnclaveServiceAsync()`.
             # Inside `__init__`, it calls `get_attestation_provider()` (mocked), `DataSentry()` (mocked), etc.
 
             # So `service_instance.attestation_provider` IS `provider`.
