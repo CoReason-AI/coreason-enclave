@@ -71,10 +71,14 @@ def reset_enclave_singleton() -> Generator[None, None, None]:
 
 
 @pytest.fixture(autouse=True)
-def mock_global_api_server() -> Generator[None, None, None]:
+def mock_global_api_server(request: pytest.FixtureRequest) -> Generator[None, None, None]:
     """
     Globally mock the API server startup to prevent port binding conflicts
     and thread leakage during tests.
     """
-    with patch("coreason_enclave.main.run_api_server"):
+    # Allow specific tests to opt-out of this mock if they need to test the server function itself
+    if "test_run_api_server_exception_handling" in request.node.name:
         yield
+    else:
+        with patch("coreason_enclave.main.run_api_server"):
+            yield
