@@ -1,10 +1,12 @@
-import pytest
+from typing import cast
 from unittest.mock import MagicMock
 
-from coreason_enclave.services import CoreasonEnclaveService, CoreasonEnclaveServiceAsync, EnclaveStatus
+import pytest
 from coreason_identity.models import UserContext
-from coreason_enclave.schemas import FederationJob, PrivacyConfig
 from nvflare.apis.signal import Signal
+
+from coreason_enclave.schemas import FederationJob, PrivacyConfig
+from coreason_enclave.services import CoreasonEnclaveService, CoreasonEnclaveServiceAsync, EnclaveStatus
 
 
 @pytest.mark.asyncio
@@ -31,8 +33,9 @@ async def test_evaluate_model_coverage() -> None:
 
     # UserContext required
     with pytest.raises(ValueError, match="UserContext is required"):
-        # We pass None to verify validation logic
-        await service.evaluate_model(None, MagicMock(), {}, Signal())
+        # We pass None to verify validation logic.
+        # We use cast(UserContext, None) to satisfy mypy while still passing None at runtime.
+        await service.evaluate_model(cast(UserContext, None), MagicMock(), {}, Signal())
 
     # Return empty dict
     context = UserContext(
