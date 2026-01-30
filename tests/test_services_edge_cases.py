@@ -1,5 +1,6 @@
 import pytest
 from unittest.mock import MagicMock
+
 from coreason_enclave.services import CoreasonEnclaveService, CoreasonEnclaveServiceAsync, EnclaveStatus
 from coreason_identity.models import UserContext
 from coreason_enclave.schemas import FederationJob, PrivacyConfig
@@ -35,13 +36,22 @@ async def test_evaluate_model_coverage() -> None:
 
     # Return empty dict
     context = UserContext(
-        user_id="u", username="u", email="e", permissions=[],
-        project_context="p", privacy_budget_spent=0.0, privacy_budget_limit=1.0
+        user_id="u",
+        username="u",
+        email="e",
+        permissions=[],
+        project_context="p",
+        privacy_budget_spent=0.0,
+        privacy_budget_limit=1.0,
     )
     job_config = FederationJob(
         job_id="00000000-0000-0000-0000-000000000000",
-        clients=["c"], min_clients=1, rounds=1,
-        dataset_id="d", model_arch="m", strategy="FED_AVG",
+        clients=["c"],
+        min_clients=1,
+        rounds=1,
+        dataset_id="d",
+        model_arch="m",
+        strategy="FED_AVG",
         privacy=PrivacyConfig(noise_multiplier=1.0, max_grad_norm=1.0, target_epsilon=10.0),
         user_context=context,
     )
