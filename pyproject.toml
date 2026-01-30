@@ -73,9 +73,12 @@ ignore_missing_imports = true
 plugins = ["pydantic.mypy"]
 
 [tool.pytest.ini_options]
-addopts = "--cov=src --cov-report=term-missing --cov-fail-under=100"
+addopts = "--cov=src/coreason_enclave --cov-report=term-missing --cov-fail-under=100"
 testpaths = ["tests"]
 asyncio_mode = "auto"
+markers = [
+    "no_global_mock: disable the global API server mock for this test",
+]
 
 [tool.coverage.run]
 omit = ["tests/*"]
