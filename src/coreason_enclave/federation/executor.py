@@ -142,7 +142,7 @@ class CoreasonExecutor(Executor):  # type: ignore[misc]
         self.aggregation_task_name = aggregation_task_name
 
         # Initialize Service
-        self.service = CoreasonEnclaveService()
+        self.service = CoreasonEnclaveService.get_instance()
         # Start lifecycle
         self.service.__enter__()
 

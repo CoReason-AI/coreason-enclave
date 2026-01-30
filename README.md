@@ -18,6 +18,7 @@
 *   **Federated Learning (FL):** Orchestrate training across distributed nodes using **NVIDIA FLARE**. Only weight updates (gradients) are shared, never raw data. Supports FedAvg, FedProx, and SCAFFOLD strategies.
 *   **Confidential Computing:** Designed to run inside hardware-encrypted **Trusted Execution Environments (TEEs)** (e.g., NVIDIA H100 Confidential Compute, Intel SGX). This ensures memory is encrypted at the CPU level, protecting against cloud provider inspection. Includes **Remote Attestation** to cryptographically prove code integrity.
 *   **Differential Privacy (DP):** Integrated with **Opacus** to inject Gaussian noise into gradients, strictly enforcing a privacy budget ($\epsilon$).
+*   **Service-Oriented Architecture:** Runs as a managed service with a **Data Sentry API** sidecar for real-time health monitoring, hardware attestation verification, and privacy budget tracking.
 *   **The "Sightless" Surgeon:** The AI learns from data it never "sees."
 *   **Data Sentry:** An "Airlock" mechanism that validates input data and strictly sanitizes output, ensuring no sensitive information leaks via logs or return payloads.
 
@@ -29,27 +30,11 @@ pip install coreason-enclave
 
 ## 💻 Usage
 
-The `coreason-enclave` agent typically runs as a service managed by an orchestrator, but can be invoked directly or integrated into custom workflows.
-
-### Basic Initialization
-
-```python
-from coreason_enclave.federation.executor import CoreasonExecutor
-from coreason_enclave.schemas import FederationJob
-
-# Initialize the Executor
-executor = CoreasonExecutor(
-    training_task_name="train",
-    aggregation_task_name="aggregate"
-)
-
-# Note: In production, this is handled automatically by the NVFlare runtime.
-# The executor listens for tasks from the Federation Overseer.
-```
+The `coreason-enclave` agent runs as a dual-process service: the Federation Client (NVFlare) and the Management API (FastAPI).
 
 ### Running the Agent (CLI)
 
-To start the agent as a standalone client connecting to a federation:
+To start the agent connecting to a federation:
 
 ```bash
 # Secure Mode (Requires TEE Hardware)
@@ -64,7 +49,16 @@ python -m coreason_enclave.main \
     --simulation
 ```
 
-For more detailed requirements and architecture, please refer to the [Product Requirements Document](docs/product_requirements.md).
+The Management API will be available at `http://127.0.0.1:8000`.
+
+### API Endpoints
+
+*   `GET /health`: Check service health and trust status.
+*   `GET /attestation`: Retrieve the hardware attestation report.
+*   `GET /privacy/budget`: Monitor current epsilon usage.
+
+For more detailed usage instructions, please refer to the [Usage Guide](docs/usage.md).
+For detailed requirements and architecture, please refer to the [Product Requirements Document](docs/product_requirements.md).
 
 ## 📜 License
 

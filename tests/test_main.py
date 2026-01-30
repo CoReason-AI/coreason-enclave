@@ -41,7 +41,15 @@ class TestMainLogic:
         with patch("sys.exit") as mock:
             yield mock
 
-    def test_main_secure_default(self, mock_start_client: MagicMock, mock_sys_exit: Any) -> None:
+    @pytest.fixture
+    def mock_run_api_server(self) -> Generator[MagicMock, None, None]:
+        """Mock the API server starter to prevent actual port binding."""
+        with patch("coreason_enclave.main.run_api_server") as mock:
+            yield mock
+
+    def test_main_secure_default(
+        self, mock_start_client: MagicMock, mock_sys_exit: Any, mock_run_api_server: MagicMock
+    ) -> None:
         """Test main runs in secure mode by default."""
         test_args = ["-w", "/tmp/ws", "-c", "conf.json"]
 
@@ -56,7 +64,9 @@ class TestMainLogic:
             assert call_kwargs["conf"] == "conf.json"
             assert isinstance(call_kwargs["context"], UserContext)
 
-    def test_main_insecure_mode(self, mock_start_client: MagicMock, mock_sys_exit: Any) -> None:
+    def test_main_insecure_mode(
+        self, mock_start_client: MagicMock, mock_sys_exit: Any, mock_run_api_server: MagicMock
+    ) -> None:
         """Test main runs in simulation mode with flag."""
         test_args = ["-w", "/tmp/ws", "-c", "conf.json", "--insecure"]
 
@@ -66,7 +76,9 @@ class TestMainLogic:
             assert os.environ["COREASON_ENCLAVE_SIMULATION"] == "true"
             mock_start_client.assert_called_once()
 
-    def test_main_simulation_mode(self, mock_start_client: MagicMock, mock_sys_exit: Any) -> None:
+    def test_main_simulation_mode(
+        self, mock_start_client: MagicMock, mock_sys_exit: Any, mock_run_api_server: MagicMock
+    ) -> None:
         """Test main runs in simulation mode with --simulation flag."""
         test_args = ["-w", "/tmp/ws", "-c", "conf.json", "--simulation"]
 
@@ -76,7 +88,9 @@ class TestMainLogic:
             assert os.environ["COREASON_ENCLAVE_SIMULATION"] == "true"
             mock_start_client.assert_called_once()
 
-    def test_main_aborts_on_env_mismatch(self, mock_start_client: MagicMock, mock_sys_exit: Any) -> None:
+    def test_main_aborts_on_env_mismatch(
+        self, mock_start_client: MagicMock, mock_sys_exit: Any, mock_run_api_server: MagicMock
+    ) -> None:
         """Test abort if env=true but flag missing."""
         test_args = ["-w", "/tmp/ws", "-c", "conf.json"]
 
@@ -93,10 +107,23 @@ class TestMainLogic:
                 assert "Security Violation" in args[0]
                 assert "required '--insecure' or '--simulation' CLI flag is missing" in args[0]
 
-    def test_insecure_flag_overrides_garbage_env(self, mock_start_client: MagicMock, mock_sys_exit: Any) -> None:
+    def test_insecure_flag_overrides_garbage_env(
+        self, mock_start_client: MagicMock, mock_sys_exit: Any, mock_run_api_server: MagicMock
+    ) -> None:
         """Test that --insecure flag overrides a garbage env var."""
         test_args = ["-w", "/tmp/ws", "-c", "conf.json", "--insecure"]
 
         with patch.dict(os.environ, {"COREASON_ENCLAVE_SIMULATION": "garbage_value"}, clear=True):
             main(test_args)
             assert os.environ["COREASON_ENCLAVE_SIMULATION"] == "true"
+
+    @pytest.mark.no_global_mock
+    def test_run_api_server_exception_handling(self) -> None:
+        """Test that run_api_server catches and logs exceptions."""
+        from coreason_enclave.main import run_api_server
+
+        with patch("uvicorn.run", side_effect=Exception("Binding failed")) as mock_uvicorn:
+            with patch("coreason_enclave.main.logger") as mock_logger:
+                run_api_server()
+                mock_uvicorn.assert_called_once()
+                mock_logger.error.assert_called_with("Failed to start Management API: Binding failed")

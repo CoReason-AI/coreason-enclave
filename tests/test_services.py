@@ -34,6 +34,8 @@ class TestCoreasonEnclaveServiceAsync:
             email="test@coreason.ai",
             permissions=[],
             project_context="test",
+            privacy_budget_spent=0.0,
+            privacy_budget_limit=10.0,
         )
 
     async def test_lifecycle(self) -> None:
@@ -54,7 +56,7 @@ class TestCoreasonEnclaveServiceAsync:
         self, service: CoreasonEnclaveServiceAsync, context: UserContext
     ) -> None:
         service.attestation_provider = MagicMock()
-        service.attestation_provider.attest.return_value.status = "UNTRUSTED"
+        service.attestation_provider.attest.side_effect = RuntimeError("Untrusted environment: UNTRUSTED")
 
         shareable = Shareable()
         # Create a dummy config so validation passes before checking hardware
@@ -123,6 +125,8 @@ class TestCoreasonEnclaveService:
             email="test@coreason.ai",
             permissions=[],
             project_context="test",
+            privacy_budget_spent=0.0,
+            privacy_budget_limit=10.0,
         )
 
     def test_sync_facade_training(self, context: UserContext) -> None:
@@ -164,3 +168,35 @@ class TestCoreasonEnclaveService:
 
         with pytest.raises(RuntimeError, match="Service used outside of context manager"):
             service.evaluate_model(context, MagicMock(), {}, Signal())
+
+    def test_refresh_attestation_outside_context(self) -> None:
+        service = CoreasonEnclaveService()
+        with pytest.raises(RuntimeError, match="Service used outside of context manager"):
+            service.refresh_attestation()
+
+    @pytest.mark.asyncio
+    async def test_check_hardware_trust_failure_exception(self) -> None:
+        """Test that check_hardware_trust propagates unexpected exceptions and sets error status."""
+        service = CoreasonEnclaveServiceAsync()
+        service.attestation_provider = MagicMock()
+        service.attestation_provider.attest.side_effect = Exception("Unexpected Error")
+
+        with pytest.raises(Exception, match="Unexpected Error"):
+            await service.check_hardware_trust()
+
+        assert service.status == "ERROR"
+
+    @pytest.mark.asyncio
+    async def test_check_hardware_trust_untrusted_status(self) -> None:
+        """Test that check_hardware_trust raises RuntimeError if report status is not TRUSTED."""
+        service = CoreasonEnclaveServiceAsync()
+        service.attestation_provider = MagicMock()
+        # Mock attest() to return an UNTRUSTED report (not raise exception)
+        mock_report = MagicMock()
+        mock_report.status = "UNTRUSTED"
+        service.attestation_provider.attest.return_value = mock_report
+
+        with pytest.raises(RuntimeError, match="Untrusted environment: UNTRUSTED"):
+            await service.check_hardware_trust()
+
+        assert service.status == "ERROR"

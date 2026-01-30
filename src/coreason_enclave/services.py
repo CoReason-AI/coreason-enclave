@@ -5,7 +5,10 @@ This module provides the Async-Native and Sync-Facade service classes for the Co
 """
 
 import json
-from typing import Any, Dict, Optional, Tuple
+import threading
+from enum import Enum
+from typing import Any, Dict, Optional, Tuple, cast
+from uuid import UUID
 
 import anyio
 import httpx
@@ -26,12 +29,22 @@ from coreason_enclave.federation.strategies import (
 from coreason_enclave.hardware.factory import get_attestation_provider
 from coreason_enclave.models.registry import ModelRegistry
 from coreason_enclave.privacy import PrivacyBudgetExceededError, PrivacyGuard
-from coreason_enclave.schemas import AggregationStrategy, FederationJob
+from coreason_enclave.schemas import AggregationStrategy, AttestationReport, FederationJob
 from coreason_enclave.sentry import DataSentry, FileExistenceValidator
 from coreason_enclave.utils.logger import logger
 
 # Default Learning Rate for the optimizer
 DEFAULT_LR = 0.01
+
+
+class EnclaveStatus(str, Enum):
+    """Lifecycle status of the Enclave Service."""
+
+    INITIALIZING = "INITIALIZING"
+    ATTESTED = "ATTESTED"
+    TRAINING = "TRAINING"
+    IDLE = "IDLE"
+    ERROR = "ERROR"
 
 
 class CoreasonEnclaveServiceAsync:
@@ -61,6 +74,11 @@ class CoreasonEnclaveServiceAsync:
         # Dictionary mapping parameter names to tensors.
         self.scaffold_c_local: Dict[str, torch.Tensor] = {}
 
+        # Lifecycle State
+        self.status = EnclaveStatus.INITIALIZING
+        self._current_job_id: Optional[UUID] = None
+        self._current_privacy_guard: Optional[PrivacyGuard] = None
+
     async def __aenter__(self) -> "CoreasonEnclaveServiceAsync":
         return self
 
@@ -80,10 +98,39 @@ class CoreasonEnclaveServiceAsync:
         await anyio.to_thread.run_sync(self._check_hardware_trust_sync)
 
     def _check_hardware_trust_sync(self) -> None:
-        report = self.attestation_provider.attest()
-        if report.status != "TRUSTED":
-            raise RuntimeError(f"Untrusted environment: {report.status}")
-        logger.info(f"Environment attested: {report.hardware_type} ({report.status})")
+        try:
+            report = self.attestation_provider.attest()
+            if report.status != "TRUSTED":
+                self.status = EnclaveStatus.ERROR
+                raise RuntimeError(f"Untrusted environment: {report.status}")
+
+            # Only update status if we are not in a specialized state (like TRAINING)
+            if self.status != EnclaveStatus.TRAINING:
+                self.status = EnclaveStatus.ATTESTED
+
+            logger.info(f"Environment attested: {report.hardware_type} ({report.status})")
+        except Exception:
+            self.status = EnclaveStatus.ERROR
+            raise
+
+    async def refresh_attestation(self) -> AttestationReport:
+        """Force a refresh of the attestation report."""
+
+        def _refresh() -> AttestationReport:
+            report = self.attestation_provider.attest()
+            if report.status != "TRUSTED":
+                self.status = EnclaveStatus.ERROR
+            elif self.status != EnclaveStatus.TRAINING:
+                self.status = EnclaveStatus.ATTESTED
+            return report
+
+        return cast(AttestationReport, await anyio.to_thread.run_sync(_refresh))
+
+    def get_privacy_budget(self) -> float:
+        """Return current epsilon consumed."""
+        if self._current_privacy_guard:
+            return self._current_privacy_guard.get_current_epsilon()
+        return 0.0
 
     def _parse_job_config(self, shareable: Shareable) -> Optional[FederationJob]:
         """
@@ -183,6 +230,21 @@ class CoreasonEnclaveServiceAsync:
         if not context:
             raise ValueError("UserContext is required for training")
 
+        self.status = EnclaveStatus.TRAINING
+
+        # Persistent Registry Cleanup
+        # If strategy is NOT SCAFFOLD, clear the SCAFFOLD state to prevent leakage.
+        # If job ID changes, clear everything.
+        if self._current_job_id != job_config.job_id:
+            logger.info(f"New Job detected ({job_config.job_id}). Clearing persistent state.")
+            self.scaffold_c_local.clear()
+            self._current_job_id = job_config.job_id
+            self._current_privacy_guard = None
+        elif job_config.strategy != AggregationStrategy.SCAFFOLD:
+            # If we are running FED_AVG or FED_PROX, ensure we don't accidentally carry over
+            # stale scaffold control variates from a previous run within the same job/session.
+            self.scaffold_c_local.clear()
+
         logger.info(
             "Enclave Service Request",
             user_id=context.user_id,
@@ -190,108 +252,117 @@ class CoreasonEnclaveServiceAsync:
             model=job_config.model_arch,
         )
 
-        # 1. Check Hardware Trust
         try:
-            await self.check_hardware_trust()
-        except RuntimeError as e:
-            logger.error(f"Attestation failed: {e}")
-            raise e
+            # 1. Check Hardware Trust
+            try:
+                await self.check_hardware_trust()
+            except RuntimeError as e:
+                logger.error(f"Attestation failed: {e}")
+                raise e
 
-        # 3. Load Resources & Initialize
-        try:
-            dataset_id = job_config.dataset_id
-            model_arch = job_config.model_arch
-            user_context = job_config.user_context
+            # 3. Load Resources & Initialize
+            try:
+                dataset_id = job_config.dataset_id
+                model_arch = job_config.model_arch
+                user_context = job_config.user_context
 
-            # Data Loading (Sync IO, might be heavy)
-            # running in thread to avoid blocking loop
-            train_loader = await anyio.to_thread.run_sync(
-                self.data_loader_factory.get_loader, dataset_id, user_context, 32
-            )
+                # Data Loading (Sync IO, might be heavy)
+                # running in thread to avoid blocking loop
+                train_loader = await anyio.to_thread.run_sync(
+                    self.data_loader_factory.get_loader, dataset_id, user_context, 32
+                )
 
-            # Model Instantiation
-            model_cls = ModelRegistry.get(model_arch)
-            model = model_cls()
+                # Model Instantiation
+                model_cls = ModelRegistry.get(model_arch)
+                model = model_cls()
 
-            # Initialize Strategy
-            strategy = self._get_strategy(job_config)
+                # Initialize Strategy
+                strategy = self._get_strategy(job_config)
 
-            # Params
-            incoming_params = params
-            if incoming_params:
-                # torch tensor creation is fast enough, but load_state_dict might be heavy for huge models
-                state_dict = {
-                    k: torch.tensor(v) if not isinstance(v, torch.Tensor) else v for k, v in incoming_params.items()
+                # Params
+                incoming_params = params
+                if incoming_params:
+                    # torch tensor creation is fast enough, but load_state_dict might be heavy for huge models
+                    state_dict = {
+                        k: torch.tensor(v) if not isinstance(v, torch.Tensor) else v for k, v in incoming_params.items()
+                    }
+                    model.load_state_dict(state_dict)
+                    logger.info("Loaded incoming params into model")
+
+                # Strategy Hook
+                if shareable:
+                    strategy.before_training(model, shareable, job_config)
+
+                # Privacy & Optimizer
+                optimizer = optim.SGD(model.parameters(), lr=DEFAULT_LR)
+                privacy_guard = PrivacyGuard(config=job_config.privacy, user_context=user_context)
+                self._current_privacy_guard = privacy_guard
+
+                # Opacus attach might be CPU intensive
+                model, optimizer, train_loader = await anyio.to_thread.run_sync(
+                    privacy_guard.attach, model, optimizer, train_loader
+                )
+
+            except Exception as e:
+                logger.error(f"Initialization failed: {e}")
+                raise e
+
+            logger.info(f"Starting training execution for {job_config.rounds} rounds (local epochs)...")
+
+            # 4. Run Training Loop (CPU Bound)
+            try:
+                result = await anyio.to_thread.run_sync(
+                    self._run_training_loop_sync,
+                    model,
+                    train_loader,
+                    optimizer,
+                    privacy_guard,
+                    strategy,
+                    abort_signal,
+                    1,  # epochs
+                )
+
+                if result is None:
+                    return {}  # Aborted
+
+                avg_loss, epsilon, total_steps = result
+
+            except Exception as e:
+                logger.exception(f"Training loop failed: {e}")
+                raise e
+
+            # 5. Strategy Hook
+            extra_metrics = strategy.after_training(model, DEFAULT_LR, total_steps)
+
+            # 6. Sanitize Output
+            # Moving to CPU and tolist is CPU bound for large models
+            def prepare_output() -> Dict[str, Any]:
+                outgoing_params = {k: v.cpu().numpy().tolist() for k, v in model.state_dict().items()}
+                training_result = {
+                    "params": outgoing_params,
+                    "metrics": {"loss": avg_loss, "epsilon": epsilon},
+                    "meta": {"dataset_id": dataset_id, "model": model_arch},
                 }
-                model.load_state_dict(state_dict)
-                logger.info("Loaded incoming params into model")
+                training_result.update(extra_metrics)
+                return training_result
 
-            # Strategy Hook
-            if shareable:
-                strategy.before_training(model, shareable, job_config)
+            training_result = await anyio.to_thread.run_sync(prepare_output)
 
-            # Privacy & Optimizer
-            optimizer = optim.SGD(model.parameters(), lr=DEFAULT_LR)
-            privacy_guard = PrivacyGuard(config=job_config.privacy, user_context=user_context)
+            try:
+                # Sanitization might involve File IO (validation), run in thread
+                sanitized_result = await anyio.to_thread.run_sync(self.sentry.sanitize_output, training_result)
+            except Exception as e:
+                logger.error(f"Output sanitation failed: {e}")
+                raise e
 
-            # Opacus attach might be CPU intensive
-            model, optimizer, train_loader = await anyio.to_thread.run_sync(
-                privacy_guard.attach, model, optimizer, train_loader
-            )
+            return dict(sanitized_result)
 
-        except Exception as e:
-            logger.error(f"Initialization failed: {e}")
-            raise e
-
-        logger.info(f"Starting training execution for {job_config.rounds} rounds (local epochs)...")
-
-        # 4. Run Training Loop (CPU Bound)
-        try:
-            result = await anyio.to_thread.run_sync(
-                self._run_training_loop_sync,
-                model,
-                train_loader,
-                optimizer,
-                privacy_guard,
-                strategy,
-                abort_signal,
-                1,  # epochs
-            )
-
-            if result is None:
-                return {}  # Aborted
-
-            avg_loss, epsilon, total_steps = result
-
-        except Exception as e:
-            logger.exception(f"Training loop failed: {e}")
-            raise e
-
-        # 5. Strategy Hook
-        extra_metrics = strategy.after_training(model, DEFAULT_LR, total_steps)
-
-        # 6. Sanitize Output
-        # Moving to CPU and tolist is CPU bound for large models
-        def prepare_output() -> Dict[str, Any]:
-            outgoing_params = {k: v.cpu().numpy().tolist() for k, v in model.state_dict().items()}
-            training_result = {
-                "params": outgoing_params,
-                "metrics": {"loss": avg_loss, "epsilon": epsilon},
-                "meta": {"dataset_id": dataset_id, "model": model_arch},
-            }
-            training_result.update(extra_metrics)
-            return training_result
-
-        training_result = await anyio.to_thread.run_sync(prepare_output)
-
-        try:
-            # Sanitization might involve File IO (validation), run in thread
-            sanitized_result = await anyio.to_thread.run_sync(self.sentry.sanitize_output, training_result)
-        except Exception as e:
-            logger.error(f"Output sanitation failed: {e}")
-            raise e
-
-        return dict(sanitized_result)
+        except Exception:
+            self.status = EnclaveStatus.ERROR
+            raise
+        finally:
+            if self.status != EnclaveStatus.ERROR:
+                self.status = EnclaveStatus.IDLE
 
     async def evaluate_model(
         self,
@@ -342,29 +413,72 @@ class CoreasonEnclaveService:
 
     Wraps CoreasonEnclaveServiceAsync to provide a synchronous interface
     compatible with existing synchronous callers (like NVFlare).
+
+    Implements a Singleton pattern to share state between the Executor and API sidecar.
     """
 
+    _instance: Optional["CoreasonEnclaveService"] = None
+    _lock: threading.Lock = threading.Lock()
+
+    @classmethod
+    def get_instance(cls, client: Optional[httpx.AsyncClient] = None) -> "CoreasonEnclaveService":
+        """Get or create the singleton instance."""
+        with cls._lock:
+            if cls._instance is None:
+                cls._instance = cls(client)
+            return cls._instance
+
     def __init__(self, client: Optional[httpx.AsyncClient] = None):
+        # Allow creating new instances, but prefer get_instance for shared state
         self._async = CoreasonEnclaveServiceAsync(client)
         self._portal: Optional[anyio.from_thread.BlockingPortal] = None
         self._portal_cm: Any = None
+        self._ref_count = 0
+        self._ctx_lock = threading.Lock()
+
+        # If this is the first instance created, set it as singleton (if not set)
+        if CoreasonEnclaveService._instance is None:
+            CoreasonEnclaveService._instance = self
 
     def __enter__(self) -> "CoreasonEnclaveService":
-        # Start a persistent event loop (portal) for the context
-        self._portal_cm = anyio.from_thread.start_blocking_portal()
-        self._portal = self._portal_cm.__enter__()
-        self._portal.call(self._async.__aenter__)
-        return self
+        with self._ctx_lock:
+            # Support re-entrant usage (reference counting)
+            self._ref_count += 1
+            if self._portal is not None:
+                return self
+
+            # Start a persistent event loop (portal) for the context
+            self._portal_cm = anyio.from_thread.start_blocking_portal()
+            self._portal = self._portal_cm.__enter__()
+            self._portal.call(self._async.__aenter__)
+            return self
 
     def __exit__(self, *args: Any) -> None:
-        if self._portal:
-            try:
-                self._portal.call(self._async.__aexit__, *args)
-            finally:
-                if self._portal_cm:
-                    self._portal_cm.__exit__(None, None, None)
-                self._portal = None
-                self._portal_cm = None
+        with self._ctx_lock:
+            self._ref_count -= 1
+            if self._ref_count > 0:
+                return
+
+            if self._portal:
+                try:
+                    self._portal.call(self._async.__aexit__, *args)
+                finally:
+                    if self._portal_cm:
+                        self._portal_cm.__exit__(None, None, None)
+                    self._portal = None
+                    self._portal_cm = None
+
+    @property
+    def status(self) -> EnclaveStatus:
+        return self._async.status
+
+    def refresh_attestation(self) -> AttestationReport:
+        if not self._portal:
+            raise RuntimeError("Service used outside of context manager")
+        return self._portal.call(self._async.refresh_attestation)  # type: ignore[no-any-return]
+
+    def get_privacy_budget(self) -> float:
+        return self._async.get_privacy_budget()
 
     def train_model(
         self,

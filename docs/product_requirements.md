@@ -60,6 +60,16 @@ The agent must implement the **Attest-Train-Aggregrate Loop**:
 *   **Input:** Validates that the local data matches the expected schema (using coreason-validator).
 *   **Output:** "Airlock." Ensures no raw data leaks out in the logs. Only model weights and loss metrics are allowed to exit the enclave.
 
+### 3.5 Health & Metrics API (Sidecar)
+
+**Concept:** A dedicated API for monitoring the enclave's operational status.
+
+*   **Endpoints:**
+    *   `GET /health`: Returns `200 OK` if the hardware is attested and the service is healthy.
+    *   `GET /attestation`: Returns the cryptographic hardware report for external verification.
+    *   `GET /privacy/budget`: Exposes the current epsilon consumption.
+*   **Security:** Binds strictly to `127.0.0.1` (localhost).
+
 ## 4. Integration Requirements
 
 *   **coreason-model-foundry:**
