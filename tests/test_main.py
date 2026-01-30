@@ -117,6 +117,7 @@ class TestMainLogic:
             main(test_args)
             assert os.environ["COREASON_ENCLAVE_SIMULATION"] == "true"
 
+    @pytest.mark.no_global_mock
     def test_run_api_server_exception_handling(self) -> None:
         """Test that run_api_server catches and logs exceptions."""
         from coreason_enclave.main import run_api_server

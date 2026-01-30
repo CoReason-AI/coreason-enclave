@@ -76,8 +76,8 @@ def mock_global_api_server(request: pytest.FixtureRequest) -> Generator[None, No
     Globally mock the API server startup to prevent port binding conflicts
     and thread leakage during tests.
     """
-    # Allow specific tests to opt-out of this mock if they need to test the server function itself
-    if "test_run_api_server_exception_handling" in request.node.name:
+    # Allow specific tests to opt-out of this mock via marker
+    if request.node.get_closest_marker("no_global_mock"):
         yield
     else:
         with patch("coreason_enclave.main.run_api_server"):
