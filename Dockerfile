@@ -45,3 +45,6 @@ COPY --from=builder /wheels /wheels
 
 # Install the application wheel
 RUN pip install --no-cache-dir /wheels/*.whl
+
+# Set entrypoint to the wrapper script (which launches both NVFlare Client and API)
+ENTRYPOINT ["python", "-m", "coreason_enclave.main"]

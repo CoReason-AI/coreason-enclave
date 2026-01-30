@@ -18,7 +18,10 @@ and acts as the "Secure Compute Wrapper" for the training process.
 import argparse
 import os
 import sys
+import threading
 from typing import Optional
+
+import uvicorn
 
 # Workaround for NVFlare Windows issue
 if sys.platform == "win32":  # pragma: no cover
@@ -31,6 +34,7 @@ if sys.platform == "win32":  # pragma: no cover
 
 from coreason_identity.models import UserContext
 
+from coreason_enclave.api import app as api_app
 from coreason_enclave.federation.executor import start_client
 from coreason_enclave.utils.logger import logger
 
@@ -73,6 +77,17 @@ def apply_security_policy(simulation_flag: bool, insecure_flag: bool) -> None:
         logger.info("Running in SECURE HARDWARE MODE. TEE Attestation required.")
 
 
+def run_api_server() -> None:
+    """Run the sidecar Management API server."""
+    logger.info("Starting Management API on 127.0.0.1:8000")
+    try:
+        # Constraint: Only listen on loopback interface
+        # Run programmatically to share the process/environment
+        uvicorn.run(api_app, host="127.0.0.1", port=8000, log_level="info")
+    except Exception as e:
+        logger.error(f"Failed to start Management API: {e}")
+
+
 def main(args: Optional[list[str]] = None) -> None:
     """
     Entry point for the Coreason Enclave Agent.
@@ -80,8 +95,9 @@ def main(args: Optional[list[str]] = None) -> None:
     Wraps NVFlare's ClientTrain to start the federation client.
     It performs the following steps:
     1. Validates security flags (Simulation vs. TEE).
-    2. Translates arguments for NVFlare.
-    3. Invokes the NVFlare client process.
+    2. Starts the Management API (Sidecar) in a background thread.
+    3. Translates arguments for NVFlare.
+    4. Invokes the NVFlare client process.
 
     Args:
         args (Optional[list[str]]): Command line arguments. Defaults to sys.argv[1:].
@@ -114,7 +130,13 @@ def main(args: Optional[list[str]] = None) -> None:
         logger.info(f"Workspace: {parsed_args.workspace}")
         logger.info(f"Config: {parsed_args.conf}")
 
-        # 2. Create System Context
+        # 2. Start Management API (Sidecar)
+        # We start this before the executor so the health check is available immediately (initializing state)
+        # Using a daemon thread so it dies when the main process (NVFlare) exits.
+        api_thread = threading.Thread(target=run_api_server, daemon=True)
+        api_thread.start()
+
+        # 3. Create System Context
         system_context = UserContext(
             user_id="cli-user",
             username="cli-user",
@@ -123,7 +145,7 @@ def main(args: Optional[list[str]] = None) -> None:
             project_context="cli",
         )
 
-        # 3. Invoke Executor
+        # 4. Invoke Executor
         start_client(
             context=system_context,
             workspace=parsed_args.workspace,
